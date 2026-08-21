@@ -50,6 +50,48 @@ public sealed class SeriesDose
     public required IReadOnlyList<AgeRule> AgeRules { get; init; }
     public required IReadOnlyList<PreferableIntervalRule> PreferableIntervals { get; init; }
     public required IReadOnlyList<AllowableIntervalRule> AllowableIntervals { get; init; }
+
+    /// <summary>§6.3 Evaluate For Inadvertent Vaccine (Table 6-12/6-13): CVX codes that, if administered for this target dose, count as an inadvertent administration rather than a real dose. Simple set membership — no temporal versioning, no reference-date resolution.</summary>
+    public required IReadOnlyList<string> InadvertentVaccineCvxCodes { get; init; }
+
+    /// <summary>§6.8 Evaluate Preferable Vaccine (Table 6-25/6-26).</summary>
+    public required IReadOnlyList<PreferableVaccine> PreferableVaccines { get; init; }
+
+    /// <summary>§6.9 Evaluate Allowable Vaccine (Table 6-28/6-29).</summary>
+    public required IReadOnlyList<AllowableVaccine> AllowableVaccines { get; init; }
+
+    /// <summary>§6.2 Evaluate Conditional Skip. Already filtered to context "Evaluation"/"Both" by the loader (per the spec's own instruction that Forecast-only instances don't apply here).</summary>
+    public required IReadOnlyList<ConditionalSkipInstance> ConditionalSkipInstances { get; init; }
+}
+
+/// <summary>One &lt;preferableVaccine&gt; entry (Table 6-25). BeginAge/EndAge default to 1900-01-01/2999-12-31 when empty (Table 6-25's own "Assumed Value if Empty" column) — matched by CVX, same convention as every other vaccine-type comparison in this codebase (conflict rules, inadvertent vaccine).</summary>
+public sealed class PreferableVaccine
+{
+    public required string Cvx { get; init; }
+    public DurationExpression? BeginAge { get; init; }
+    public DurationExpression? EndAge { get; init; }
+    public string? TradeName { get; init; }
+    public double? Volume { get; init; }
+
+    private static readonly DateOnly DefaultFloor = new(1900, 1, 1);
+    private static readonly DateOnly DefaultCeiling = new(2999, 12, 31);
+
+    public DateOnly BeginAgeDate(DateOnly dob) => BeginAge?.AddTo(dob) ?? DefaultFloor;
+    public DateOnly EndAgeDate(DateOnly dob) => EndAge?.AddTo(dob) ?? DefaultCeiling;
+}
+
+/// <summary>One &lt;allowableVaccine&gt; entry (Table 6-28). Same age-default convention as PreferableVaccine, but no trade name/volume fields — Table 6-29 only checks vaccine type and age window.</summary>
+public sealed class AllowableVaccine
+{
+    public required string Cvx { get; init; }
+    public DurationExpression? BeginAge { get; init; }
+    public DurationExpression? EndAge { get; init; }
+
+    private static readonly DateOnly DefaultFloor = new(1900, 1, 1);
+    private static readonly DateOnly DefaultCeiling = new(2999, 12, 31);
+
+    public DateOnly BeginAgeDate(DateOnly dob) => BeginAge?.AddTo(dob) ?? DefaultFloor;
+    public DateOnly EndAgeDate(DateOnly dob) => EndAge?.AddTo(dob) ?? DefaultCeiling;
 }
 
 /// <summary>§6.4 Evaluate Age. Table 6-14 empty-value defaults: AbsMinAge/MinAge missing → 1900-01-01 floor; MaxAge missing → 2999-12-31 ceiling.</summary>

@@ -38,6 +38,15 @@ public class DurationExpressionTests
     }
 
     [Fact]
+    public void MonthsPlusDays_AddsCalendarMonthsThenAddsDays()
+    {
+        // Real Rotavirus dose data: "8 months + 1 day"
+        var d = DurationExpression.Parse("8 months + 1 day");
+        // 2024-01-01 + 8 months = 2024-09-01; plus 1 day = 2024-09-02
+        Assert.Equal(new DateOnly(2024, 9, 2), d.AddTo(new DateOnly(2024, 1, 1)));
+    }
+
+    [Fact]
     public void ZeroDays_ReturnsAnchorUnchanged()
     {
         var d = DurationExpression.Parse("0 days");

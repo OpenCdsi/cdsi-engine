@@ -86,9 +86,115 @@ public static class AntigenSupportingDataLoader
             DoseNumber = XmlParsingHelpers.ParseDoseNumber(doseNumberText),
             AgeRules = el.Elements("age").Where(HasChildren).Select(ParseAgeRule).ToArray(),
             PreferableIntervals = el.Elements("interval").Where(HasChildren).Select(ParsePreferableInterval).ToArray(),
-            AllowableIntervals = el.Elements("allowableInterval").Where(HasChildren).Select(ParseAllowableInterval).ToArray()
+            AllowableIntervals = el.Elements("allowableInterval").Where(HasChildren).Select(ParseAllowableInterval).ToArray(),
+            InadvertentVaccineCvxCodes = el.Elements("inadvertentVaccine").Where(HasChildren)
+                .Select(iv => iv.ElementTextOrNull("cvx"))
+                .Where(cvx => cvx is not null)
+                .Select(cvx => cvx!)
+                .ToArray(),
+            PreferableVaccines = el.Elements("preferableVaccine").Where(HasChildren).Select(ParsePreferableVaccine).ToArray(),
+            AllowableVaccines = el.Elements("allowableVaccine").Where(HasChildren).Select(ParseAllowableVaccine).ToArray(),
+            ConditionalSkipInstances = el.Elements("conditionalSkip").Where(HasChildren)
+                .Select(ParseConditionalSkipInstance)
+                .Where(cs => cs.Context is null || cs.Context.Equals("Evaluation", StringComparison.OrdinalIgnoreCase) || cs.Context.Equals("Both", StringComparison.OrdinalIgnoreCase))
+                .ToArray()
         };
     }
+
+    private static ConditionalSkipInstance ParseConditionalSkipInstance(XElement el) => new()
+    {
+        Context = el.ElementTextOrNull("context"),
+        SetLogic = ParseCombinationLogicOrNull(el.ElementTextOrNull("setLogic")),
+        Sets = el.Elements("set").Where(HasChildren).Select(ParseConditionalSkipSet).ToArray()
+    };
+
+    private static ConditionalSkipSet ParseConditionalSkipSet(XElement el) => new()
+    {
+        SetId = el.ElementTextOrNull("setID"),
+        EffectiveDate = el.ParseDateOrNull("effectiveDate"),
+        CessationDate = el.ParseDateOrNull("cessationDate"),
+        ConditionLogic = ParseCombinationLogicOrNull(el.ElementTextOrNull("conditionLogic")),
+        Conditions = el.Elements("condition").Where(HasChildren).Select(ParseConditionalSkipCondition).ToArray()
+    };
+
+    private static ConditionalSkipCondition ParseConditionalSkipCondition(XElement el)
+    {
+        var typeText = el.ElementTextOrNull("conditionType")
+            ?? throw new InvalidOperationException("conditionalSkip condition missing conditionType.");
+
+        var vaccineTypesText = el.ElementTextOrNull("vaccineTypes");
+
+        return new ConditionalSkipCondition
+        {
+            ConditionType = ParseConditionType(typeText),
+            StartDate = el.ParseDateOrNull("startDate"),
+            EndDate = el.ParseDateOrNull("endDate"),
+            BeginAge = el.ParseDurationOrNull("beginAge"),
+            EndAge = el.ParseDurationOrNull("endAge"),
+            DoseCount = el.ElementTextOrNull("doseCount") is string dc ? int.Parse(dc) : null,
+            DoseType = ParseDoseTypeOrNull(el.ElementTextOrNull("doseType")),
+            DoseCountLogic = ParseDoseCountLogicOrNull(el.ElementTextOrNull("doseCountLogic")),
+            VaccineTypeCvxCodes = vaccineTypesText is null ? Array.Empty<string>() : XmlParsingHelpers.ParseCvxList(vaccineTypesText),
+            Interval = el.ParseDurationOrNull("interval"),
+            SeriesGroups = el.ElementTextOrNull("seriesGroups")
+        };
+    }
+
+    /// <summary>Real data mixes casing throughout conditionalSkip ("greater than" / "Greater Than", "Valid" / "valid", "Vaccine Count by Age" / "Vaccine Count By Age") - every enum parse here is deliberately case-insensitive.</summary>
+    private static SkipCombinationLogic? ParseCombinationLogicOrNull(string? text) => text?.Trim().ToUpperInvariant() switch
+    {
+        null => null,
+        "AND" => SkipCombinationLogic.And,
+        "OR" => SkipCombinationLogic.Or,
+        "N/A" => null, // real data uses the literal string "n/a" when a single set/condition needs no combination logic
+        _ => throw new FormatException($"Unrecognized set/condition logic: '{text}'")
+    };
+
+    private static ConditionType ParseConditionType(string text)
+    {
+        var normalized = text.Trim().ToLowerInvariant();
+        if (normalized == "age") return ConditionType.Age;
+        if (normalized == "completed series") return ConditionType.CompletedSeries;
+        if (normalized == "interval") return ConditionType.Interval;
+        if (normalized.StartsWith("vaccine count")) return ConditionType.VaccineCount; // covers "by Age" / "By Date" / "by Date and Age" variants - see ConditionType's doc comment
+        throw new FormatException($"Unrecognized conditional skip condition type: '{text}'");
+    }
+
+    private static ConditionalSkipDoseType? ParseDoseTypeOrNull(string? text) => text?.Trim().ToLowerInvariant() switch
+    {
+        null => null,
+        "valid" => ConditionalSkipDoseType.Valid,
+        "total" => ConditionalSkipDoseType.Total,
+        _ => throw new FormatException($"Unrecognized conditional skip dose type: '{text}'")
+    };
+
+    private static DoseCountLogic? ParseDoseCountLogicOrNull(string? text) => text?.Trim().ToLowerInvariant() switch
+    {
+        null => null,
+        "greater than" => DoseCountLogic.GreaterThan,
+        "equal to" => DoseCountLogic.EqualTo,
+        "less than" => DoseCountLogic.LessThan,
+        _ => throw new FormatException($"Unrecognized conditional skip dose count logic: '{text}'")
+    };
+
+    private static PreferableVaccine ParsePreferableVaccine(XElement el) => new()
+    {
+        Cvx = el.ElementTextOrNull("cvx") ?? throw new InvalidOperationException("preferableVaccine element missing cvx."),
+        BeginAge = el.ParseDurationOrNull("beginAge"),
+        EndAge = el.ParseDurationOrNull("endAge"),
+        TradeName = el.ElementTextOrNull("tradeName"),
+        Volume = ParseVolumeOrNull(el.ElementTextOrNull("volume"))
+    };
+
+    private static AllowableVaccine ParseAllowableVaccine(XElement el) => new()
+    {
+        Cvx = el.ElementTextOrNull("cvx") ?? throw new InvalidOperationException("allowableVaccine element missing cvx."),
+        BeginAge = el.ParseDurationOrNull("beginAge"),
+        EndAge = el.ParseDurationOrNull("endAge")
+    };
+
+    private static double? ParseVolumeOrNull(string? text) =>
+        text is null ? null : double.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// The supporting data represents "this attribute doesn't apply to this dose" with an

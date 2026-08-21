@@ -6,6 +6,19 @@ public sealed class ScheduleSupportingData
 {
     public required IReadOnlyDictionary<string, CvxMapEntry> CvxToAntigen { get; init; }
     public required IReadOnlyList<VaccineConflictRule> VaccineConflicts { get; init; }
+
+    /// <summary>
+    /// VaccineConflicts indexed by impacted (current) CVX for O(1) lookup at evaluation time —
+    /// §6.7's lookup direction is always "given the dose I'm evaluating, which prior vaccine
+    /// types could conflict with it," never the reverse. Built once at load time rather than
+    /// scanning all 625 rows per dose evaluated.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<VaccineConflictRule>> ConflictsByImpactedCvx =>
+        _conflictsByImpactedCvx ??= VaccineConflicts
+            .GroupBy(c => c.ImpactedCvx)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<VaccineConflictRule>)g.ToArray());
+
+    private Dictionary<string, IReadOnlyList<VaccineConflictRule>>? _conflictsByImpactedCvx;
 }
 
 /// <summary>Loads ScheduleSupportingData.xml — the cross-antigen lookups (CVX-to-antigen map, vaccine conflicts) that §4.2 and §6.7 depend on.</summary>
