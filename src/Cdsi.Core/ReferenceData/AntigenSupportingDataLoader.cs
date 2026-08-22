@@ -13,6 +13,91 @@ public static class AntigenSupportingDataLoader
         return ParseSeriesList(root, path);
     }
 
+    public static AntigenImmunityData LoadImmunityData(string path)
+    {
+        var doc = XDocument.Load(path);
+        var root = doc.Root ?? throw new InvalidOperationException($"'{path}' has no root element.");
+        var immunityEl = root.Element("immunity");
+
+        if (immunityEl is null)
+        {
+            return new AntigenImmunityData { ClinicalHistoryGuidelines = Array.Empty<ImmunityClinicalHistoryGuideline>(), BirthDateRules = Array.Empty<ImmunityBirthDateRule>() };
+        }
+
+        var guidelines = immunityEl.Elements("clinicalHistory").Where(HasChildren).Select(ch => new ImmunityClinicalHistoryGuideline
+        {
+            GuidelineCode = ch.ElementTextOrNull("guidelineCode") ?? throw new InvalidOperationException("clinicalHistory missing guidelineCode."),
+            GuidelineTitle = ch.ElementTextOrNull("guidelineTitle")
+        }).ToArray();
+
+        var birthDateRules = immunityEl.Elements("dateOfBirth").Where(HasChildren).Select(ParseImmunityBirthDateRule).ToArray();
+
+        return new AntigenImmunityData { ClinicalHistoryGuidelines = guidelines, BirthDateRules = birthDateRules };
+    }
+
+    public static AntigenContraindicationData LoadContraindicationData(string path)
+    {
+        var doc = XDocument.Load(path);
+        var root = doc.Root ?? throw new InvalidOperationException($"'{path}' has no root element.");
+        var ciEl = root.Element("contraindications");
+
+        if (ciEl is null)
+        {
+            return new AntigenContraindicationData { AntigenLevel = Array.Empty<AntigenContraindication>(), VaccineLevel = Array.Empty<VaccineContraindication>() };
+        }
+
+        var antigenLevel = ciEl.Element("vaccineGroup")?.Elements("contraindication").Where(HasChildren)
+            .Select(ParseAntigenContraindication).ToArray() ?? Array.Empty<AntigenContraindication>();
+
+        var vaccineLevel = ciEl.Element("vaccine")?.Elements("contraindication").Where(HasChildren)
+            .Select(ParseVaccineContraindication).ToArray() ?? Array.Empty<VaccineContraindication>();
+
+        return new AntigenContraindicationData { AntigenLevel = antigenLevel, VaccineLevel = vaccineLevel };
+    }
+
+    private static AntigenContraindication ParseAntigenContraindication(XElement el) => new()
+    {
+        ObservationCode = el.ElementTextOrNull("observationCode") ?? throw new InvalidOperationException("vaccineGroup contraindication missing observationCode."),
+        ObservationTitle = el.ElementTextOrNull("observationTitle"),
+        ContraindicationText = el.ElementTextOrNull("contraindicationText"),
+        ContraindicationGuidance = el.ElementTextOrNull("contraindicationGuidance"),
+        BeginAge = el.ParseDurationOrNull("beginAge"),
+        EndAge = el.ParseDurationOrNull("endAge")
+    };
+
+    private static VaccineContraindication ParseVaccineContraindication(XElement el) => new()
+    {
+        ObservationCode = el.ElementTextOrNull("observationCode") ?? throw new InvalidOperationException("vaccine contraindication missing observationCode."),
+        ObservationTitle = el.ElementTextOrNull("observationTitle"),
+        ContraindicationText = el.ElementTextOrNull("contraindicationText"),
+        ContraindicationGuidance = el.ElementTextOrNull("contraindicationGuidance"),
+        ContraindicatedVaccines = el.Elements("contraindicatedVaccine").Where(HasChildren).Select(cv => new ContraindicatedVaccine
+        {
+            Cvx = cv.ElementTextOrNull("cvx") ?? throw new InvalidOperationException("contraindicatedVaccine missing cvx."),
+            BeginAge = cv.ParseDurationOrNull("beginAge"),
+            EndAge = cv.ParseDurationOrNull("endAge")
+        }).ToArray()
+    };
+
+    private static ImmunityBirthDateRule ParseImmunityBirthDateRule(XElement el)
+    {
+        var dateText = el.ElementTextOrNull("immunityBirthDate")
+            ?? throw new InvalidOperationException("dateOfBirth immunity rule missing immunityBirthDate.");
+
+        return new ImmunityBirthDateRule
+        {
+            // MM/DD/YYYY - deliberately different parsing from the yyyyMMdd used elsewhere in
+            // this dataset; confirmed against all real instances before writing this.
+            ImmunityBirthDate = DateOnly.ParseExact(dateText, "MM/dd/yyyy", System.Globalization.CultureInfo.InvariantCulture),
+            BirthCountry = el.ElementTextOrNull("birthCountry"),
+            Exclusions = el.Elements("exclusion").Where(HasChildren).Select(ex => new ImmunityExclusion
+            {
+                ExclusionCode = ex.ElementTextOrNull("exclusionCode") ?? throw new InvalidOperationException("exclusion missing exclusionCode."),
+                ExclusionTitle = ex.ElementTextOrNull("exclusionTitle")
+            }).ToArray()
+        };
+    }
+
     private static IReadOnlyList<AntigenSeries> ParseSeriesList(XElement root, string sourcePath)
     {
         var seriesElements = root.Element("series") is not null
@@ -60,7 +145,11 @@ public static class AntigenSupportingDataLoader
             SeriesType = XmlParsingHelpers.ParseSeriesType(seriesTypeText),
             RequiredGenders = requiredGenders,
             Indications = indications,
-            SeriesDoses = seriesDoses
+            SeriesDoses = seriesDoses,
+            SeriesAdminGuidance = seriesEl.Elements("seriesAdminGuidance")
+                .Select(e => e.Value)
+                .Where(text => !string.IsNullOrWhiteSpace(text))
+                .ToArray()
         };
     }
 
@@ -72,7 +161,8 @@ public static class AntigenSupportingDataLoader
             ObservationCode = obsCodeEl?.ElementTextOrNull("code"),
             Description = el.ElementTextOrNull("description"),
             BeginAge = el.ParseDurationOrNull("beginAge"),
-            EndAge = el.ParseDurationOrNull("endAge")
+            EndAge = el.ParseDurationOrNull("endAge"),
+            Guidance = el.ElementTextOrNull("guidance")
         };
     }
 
@@ -96,8 +186,10 @@ public static class AntigenSupportingDataLoader
             AllowableVaccines = el.Elements("allowableVaccine").Where(HasChildren).Select(ParseAllowableVaccine).ToArray(),
             ConditionalSkipInstances = el.Elements("conditionalSkip").Where(HasChildren)
                 .Select(ParseConditionalSkipInstance)
-                .Where(cs => cs.Context is null || cs.Context.Equals("Evaluation", StringComparison.OrdinalIgnoreCase) || cs.Context.Equals("Both", StringComparison.OrdinalIgnoreCase))
-                .ToArray()
+                .ToArray(),
+            SeasonalRecommendation = el.Element("seasonalRecommendation") is XElement sr && HasChildren(sr)
+                ? new SeasonalRecommendation { StartDate = sr.ParseDateOrNull("startDate"), EndDate = sr.ParseDateOrNull("endDate") }
+                : null
         };
     }
 
@@ -183,7 +275,8 @@ public static class AntigenSupportingDataLoader
         BeginAge = el.ParseDurationOrNull("beginAge"),
         EndAge = el.ParseDurationOrNull("endAge"),
         TradeName = el.ElementTextOrNull("tradeName"),
-        Volume = ParseVolumeOrNull(el.ElementTextOrNull("volume"))
+        Volume = ParseVolumeOrNull(el.ElementTextOrNull("volume")),
+        ForecastVaccineTypeFlag = string.Equals(el.ElementTextOrNull("forecastVaccineType"), "Y", StringComparison.OrdinalIgnoreCase)
     };
 
     private static AllowableVaccine ParseAllowableVaccine(XElement el) => new()
@@ -210,7 +303,9 @@ public static class AntigenSupportingDataLoader
         CessationDate = el.ParseDateOrNull("cessationDate"),
         AbsMinAge = el.ParseDurationOrNull("absMinAge"),
         MinAge = el.ParseDurationOrNull("minAge"),
-        MaxAge = el.ParseDurationOrNull("maxAge")
+        MaxAge = el.ParseDurationOrNull("maxAge"),
+        EarliestRecAge = el.ParseDurationOrNull("earliestRecAge"),
+        LatestRecAge = el.ParseDurationOrNull("latestRecAge")
     };
 
     private static PreferableIntervalRule ParsePreferableInterval(XElement el)
@@ -225,7 +320,9 @@ public static class AntigenSupportingDataLoader
             ReferenceVaccineCvxCodes = refCvxCodes,
             ReferenceObservationCode = refObsCode,
             AbsMinInt = el.ParseDurationOrNull("absMinInt"),
-            MinInt = el.ParseDurationOrNull("minInt")
+            MinInt = el.ParseDurationOrNull("minInt"),
+            EarliestRecInt = el.ParseDurationOrNull("earliestRecInt"),
+            LatestRecInt = el.ParseDurationOrNull("latestRecInt")
         };
     }
 

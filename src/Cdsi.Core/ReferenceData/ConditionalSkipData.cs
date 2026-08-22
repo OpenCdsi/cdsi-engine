@@ -13,7 +13,7 @@ namespace Cdsi.Core.ReferenceData;
 /// </summary>
 public sealed class ConditionalSkipInstance
 {
-    public required string? Context { get; init; } // "Evaluation" | "Forecast" | "Both" - already filtered to Evaluation/Both by the loader
+    public required string? Context { get; init; } // "Evaluation" | "Forecast" | "Both" - filtering happens at evaluation call time, see EvaluateConditionalSkip's context parameter (§7.1 needs Forecast/Both instances too, which used to be discarded at load time - fixed when building Forecast)
     public required SkipCombinationLogic? SetLogic { get; init; }
     public required IReadOnlyList<ConditionalSkipSet> Sets { get; init; }
 }

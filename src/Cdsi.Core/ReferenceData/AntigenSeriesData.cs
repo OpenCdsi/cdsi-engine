@@ -25,6 +25,9 @@ public sealed class AntigenSeries
     public required IReadOnlyList<Indication> Indications { get; init; }
     public required IReadOnlyList<SeriesDose> SeriesDoses { get; init; }
 
+    /// <summary>§7.5 FORECASTGUIDANCE-1. Free-text administrative guidance for the series regimen itself (e.g. "Anyone age 60 years or older who does not meet risk-based recommendations may still receive Hepatitis B vaccination."). Only non-empty entries kept - real data has 250 total, 211 non-empty.</summary>
+    public required IReadOnlyList<string> SeriesAdminGuidance { get; init; }
+
     public bool AppliesToGender(Gender patientGender) =>
         RequiredGenders.Count == 0 || RequiredGenders.Contains(patientGender);
 }
@@ -36,6 +39,9 @@ public sealed class Indication
     public string? Description { get; init; }
     public DurationExpression? BeginAge { get; init; }
     public DurationExpression? EndAge { get; init; }
+
+    /// <summary>§7.5 FORECASTGUIDANCE-1. Free-text guidance specific to this indication. Real data: 791 total, 136 non-empty.</summary>
+    public string? Guidance { get; init; }
 }
 
 /// <summary>
@@ -60,8 +66,20 @@ public sealed class SeriesDose
     /// <summary>§6.9 Evaluate Allowable Vaccine (Table 6-28/6-29).</summary>
     public required IReadOnlyList<AllowableVaccine> AllowableVaccines { get; init; }
 
-    /// <summary>§6.2 Evaluate Conditional Skip. Already filtered to context "Evaluation"/"Both" by the loader (per the spec's own instruction that Forecast-only instances don't apply here).</summary>
+    /// <summary>§6.2 / §7.1 Evaluate Conditional Skip. ALL instances are loaded regardless of context - the Evaluation-vs-Forecast context filter is applied by the caller at evaluation time (see EvaluateConditionalSkip.CanBeSkipped's context parameter), not here, since the same supporting data serves both §6.2 (Evaluation) and §7.1 (Forecast) with only the applicable-context filter differing between them.</summary>
     public required IReadOnlyList<ConditionalSkipInstance> ConditionalSkipInstances { get; init; }
+
+    /// <summary>§7.4 Determine Forecast Need (Table 7-9/7-10). At most one per dose in real data (53 populated instances across all 30 files). Null if this dose has no seasonal restriction.</summary>
+    public SeasonalRecommendation? SeasonalRecommendation { get; init; }
+}
+
+/// <summary>A date window (e.g. a flu season) outside of which a dose shouldn't be forecast. EndDate defaults to 12/31/2999 when absent (Table 7-9) - real COVID-19 data only specifies StartDate, meaning it never "expires" under this rule.</summary>
+public sealed class SeasonalRecommendation
+{
+    public DateOnly? StartDate { get; init; }
+    public DateOnly? EndDate { get; init; }
+
+    public DateOnly EffectiveEndDate => EndDate ?? new DateOnly(2999, 12, 31);
 }
 
 /// <summary>One &lt;preferableVaccine&gt; entry (Table 6-25). BeginAge/EndAge default to 1900-01-01/2999-12-31 when empty (Table 6-25's own "Assumed Value if Empty" column) — matched by CVX, same convention as every other vaccine-type comparison in this codebase (conflict rules, inadvertent vaccine).</summary>
@@ -72,6 +90,9 @@ public sealed class PreferableVaccine
     public DurationExpression? EndAge { get; init; }
     public string? TradeName { get; init; }
     public double? Volume { get; init; }
+
+    /// <summary>§7.5 FORECASTRECVAC-1. "Y" means this vaccine type can be recommended by the Forecast (not every preferable vaccine is forecast-eligible - 742 of 1089 real entries are "N"). Defaults to false ("N") when absent, per Table 7-12.</summary>
+    public bool ForecastVaccineTypeFlag { get; init; }
 
     private static readonly DateOnly DefaultFloor = new(1900, 1, 1);
     private static readonly DateOnly DefaultCeiling = new(2999, 12, 31);
@@ -103,12 +124,20 @@ public sealed class AgeRule : ITemporallyVersioned
     public DurationExpression? MinAge { get; init; }
     public DurationExpression? MaxAge { get; init; }
 
+    /// <summary>§7.5 CALCDTAGE-3/CALCDTAGE-2. Forecast-only concepts (not used by §6.4 Ch.6 evaluation) - no "Assumed Value if Empty" default per Table 7-12, so these stay null rather than falling back to a sentinel when absent.</summary>
+    public DurationExpression? EarliestRecAge { get; init; }
+    public DurationExpression? LatestRecAge { get; init; }
+
     private static readonly DateOnly DefaultFloor = new(1900, 1, 1);
     private static readonly DateOnly DefaultCeiling = new(2999, 12, 31);
 
     public DateOnly AbsMinAgeDate(DateOnly dob) => AbsMinAge?.AddTo(dob) ?? DefaultFloor;
     public DateOnly MinAgeDate(DateOnly dob) => MinAge?.AddTo(dob) ?? DefaultFloor;
     public DateOnly MaxAgeDate(DateOnly dob) => MaxAge?.AddTo(dob) ?? DefaultCeiling;
+
+    /// <summary>Null if EarliestRecAge isn't specified - per §7.5, callers must NOT default this to a sentinel.</summary>
+    public DateOnly? EarliestRecAgeDate(DateOnly dob) => EarliestRecAge?.AddTo(dob);
+    public DateOnly? LatestRecAgeDate(DateOnly dob) => LatestRecAge?.AddTo(dob);
 }
 
 public enum IntervalReferenceType
@@ -135,6 +164,14 @@ public sealed class PreferableIntervalRule : ITemporallyVersioned
 
     public DurationExpression? AbsMinInt { get; init; }
     public DurationExpression? MinInt { get; init; }
+
+    /// <summary>§7.5 CALCDTINT-5/CALCDTINT-6. Forecast-only concepts (not used by §6.5 Ch.6 evaluation) - no default per Table 7-12, so these stay null rather than falling back to a sentinel when absent.</summary>
+    public DurationExpression? EarliestRecInt { get; init; }
+    public DurationExpression? LatestRecInt { get; init; }
+
+    /// <summary>Requires a resolved reference date, same as MinInt/AbsMinInt - see EvaluatePreferableInterval's reference-date resolution.</summary>
+    public DateOnly? EarliestRecIntDate(DateOnly referenceDate) => EarliestRecInt?.AddTo(referenceDate);
+    public DateOnly? LatestRecIntDate(DateOnly referenceDate) => LatestRecInt?.AddTo(referenceDate);
 }
 
 /// <summary>§6.6 Evaluate Allowable Interval — narrower than PreferableIntervalRule: no grace-period tier, and per §6.6, ABSENCE of this rule on a target dose means "not valid" rather than "valid" (opposite default from Age).</summary>

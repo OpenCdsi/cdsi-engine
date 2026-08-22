@@ -47,7 +47,7 @@ public static class EvaluateDoseAgainstTargetDose
         // §6.2 - gate.
         var priorForSkip = priorDosesOfThisAntigen.Select(MapToPriorDoseForSkipOrConflict).ToArray();
         var canSkip = EvaluateConditionalSkip.CanBeSkipped(
-            patient.DateOfBirth, administeredDose.DateAdministered, targetDose.ConditionalSkipInstances, priorForSkip, resolveCompletedSeries);
+            patient.DateOfBirth, administeredDose.DateAdministered, ConditionalSkipContext.Evaluation, targetDose.ConditionalSkipInstances, priorForSkip, resolveCompletedSeries);
         if (canSkip)
         {
             return TargetDoseEvaluationResult.Skipped();

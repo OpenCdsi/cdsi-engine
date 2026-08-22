@@ -6,8 +6,14 @@ public sealed class Patient
     public required DateOnly DateOfBirth { get; init; }
     public Gender Gender { get; init; } = Gender.Unknown;
 
+    /// <summary>Needed by §7.2 Table 7-3's country-of-birth comparison for the immunity birth-date presumption. Null if unknown.</summary>
+    public string? CountryOfBirth { get; init; }
+
     /// <summary>Active patient observations (e.g. a documented risk condition) used by §5.1 indication matching and §5.1.1 immunity evidence.</summary>
     public IReadOnlyList<PatientObservation> ActiveObservations { get; init; } = Array.Empty<PatientObservation>();
+
+    /// <summary>Documented adverse reactions to prior vaccine doses, used by §7.3 Determine Contraindications. Kept separate from ActiveObservations per Table 7-4's own attribute list, though the underlying supporting data doesn't structurally distinguish which codes belong in which bucket - see AntigenContraindicationData's doc comment.</summary>
+    public IReadOnlyList<PatientObservation> AdverseReactions { get; init; } = Array.Empty<PatientObservation>();
 
     /// <summary>
     /// ASSUMPTION — flagged for your review: §5.1 (Table 5-4) requires a three-way answer to

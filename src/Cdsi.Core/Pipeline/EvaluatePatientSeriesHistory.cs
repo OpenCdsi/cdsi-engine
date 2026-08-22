@@ -1,0 +1,85 @@
+using Cdsi.Core.Evaluation;
+using Cdsi.Core.Models;
+using Cdsi.Core.ReferenceData;
+
+namespace Cdsi.Core.Pipeline;
+
+/// <summary>
+/// §4.4's Figure 4-5 high-level loop: run EvaluateSeriesHistory (§4.4's per-series inner loop)
+/// across EVERY relevant patient series for a patient, not just one in isolation. This is the
+/// entry point that ties OrganizeImmunizationHistory -> CreateRelevantPatientSeries -> (per
+/// series) EvaluateSeriesHistory together into one real "evaluate this patient" call, and its
+/// output (specifically each series' CurrentTargetDoseNumber) is exactly what §7 Forecast needs
+/// to know what to forecast next.
+///
+/// KEY DESIGN POINT, directly grounded in §4.4's own text: "An administered dose that is 'valid'
+/// for one relevant patient series may be 'not valid' for a different relevant patient series
+/// for the same patient." Each series is evaluated completely independently against the SAME
+/// raw antigen-administered records - series never share evaluation state with each other, even
+/// two series for the same antigen. Only Vaccine Conflict (§6.7) crosses series boundaries, and
+/// only for genuinely DIFFERENT antigens (see below).
+///
+/// SIMPLIFICATION, flagged: when a patient has multiple relevant series for the SAME antigen
+/// (a real, documented scenario per §5.1's equivalent series groups), cross-antigen Vaccine
+/// Conflict resolution for OTHER antigens' series only sees evaluated-dose history from
+/// whichever same-antigen series happened to run first in this pass, not all of them. The
+/// underlying administered fact (this CVX was given on this date) is patient-truth regardless
+/// of series, but the evaluation STATUS attached to it (which affects CALCDTCONFLICT-2's
+/// end-interval branch) can genuinely differ per series - picking one is a reasonable but real
+/// simplification, not a spec-mandated resolution.
+///
+/// STILL DEFERRED: §6.2's "Completed Series" condition. Its seriesGroups value (real data: "1")
+/// turns out to reference §5.1's selectSeries/seriesGroup concept - Chapter 8 "Select Best
+/// Patient Series" territory that doesn't exist in this codebase at all yet. Resolving it
+/// properly needs that built first, not just this orchestrator.
+/// </summary>
+public static class EvaluatePatientSeriesHistory
+{
+    public static IReadOnlyDictionary<AntigenSeries, SeriesHistoryResult> Execute(
+        Patient patient,
+        IReadOnlyList<AntigenSeries> relevantSeries,
+        IReadOnlyList<VaccineDoseAdministered> allDosesAdministered,
+        IReadOnlyDictionary<string, CvxMapEntry> cvxToAntigen,
+        IReadOnlyDictionary<string, IReadOnlyList<VaccineConflictRule>> conflictsByImpactedCvx,
+        Func<string?, bool> resolveCompletedSeries)
+    {
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, allDosesAdministered, cvxToAntigen);
+
+        var results = new Dictionary<AntigenSeries, SeriesHistoryResult>();
+        var patientWideHistory = new List<EvaluatedAntigenDose>();
+
+        // Sorted for determinism, not because order is spec-mandated - the spec doesn't say
+        // what order relevant series should be evaluated in.
+        var orderedSeries = relevantSeries
+            .OrderBy(s => s.Antigen, StringComparer.Ordinal)
+            .ThenBy(s => s.SeriesName, StringComparer.Ordinal);
+
+        foreach (var series in orderedSeries)
+        {
+            var thisAntigenRecords = antigenRecords
+                .Where(r => r.Antigen == series.Antigen)
+                .OrderBy(r => r.DateAdministered)
+                .ToArray();
+
+            var otherAntigensHistory = patientWideHistory
+                .Where(d => d.Antigen != series.Antigen)
+                .ToArray();
+
+            var seriesResult = EvaluateSeriesHistory.Execute(
+                patient, series, thisAntigenRecords, otherAntigensHistory,
+                conflictsByImpactedCvx, resolveCompletedSeries);
+
+            results[series] = seriesResult;
+
+            // Only contribute this antigen's history once - if another relevant series for the
+            // SAME antigen runs later, don't let it overwrite/duplicate what's already there
+            // (see the SIMPLIFICATION note above).
+            if (!patientWideHistory.Any(d => d.Antigen == series.Antigen))
+            {
+                patientWideHistory.AddRange(seriesResult.AllEvaluatedDoses);
+            }
+        }
+
+        return results;
+    }
+}

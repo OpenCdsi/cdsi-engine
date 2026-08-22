@@ -3,10 +3,15 @@ using Cdsi.Core.ReferenceData;
 namespace Cdsi.Core.Evaluation;
 
 /// <summary>
-/// §6.2 Evaluate Conditional Skip (Tables 6-6 through 6-11). Determines whether a target dose
-/// can be skipped entirely. Like §6.1, this is a pre-gate: Table 6-11's outcome is a distinct
-/// "Skipped" target dose status, not one of the AND-able conditions in §6.10's aggregator, so
-/// results here are a plain bool rather than DoseEvaluationOutcome.
+/// §6.2 / §7.1 Evaluate Conditional Skip (Tables 6-6 through 6-11). Determines whether a target
+/// dose can be skipped entirely. Like §6.1, this is a pre-gate: Table 6-11's outcome is a
+/// distinct "Skipped" target dose status, not one of the AND-able conditions in §6.10's
+/// aggregator, so results here are a plain bool rather than DoseEvaluationOutcome.
+///
+/// The exact same tables/business rules serve both §6.2 (Evaluation) and §7.1 (Forecast) - the
+/// only difference is which `context` value on the top-level instance applies ("Evaluation"/
+/// "Both" for §6.2, "Forecast"/"Both" for §7.1). This is why ConditionalSkipContext exists as a
+/// caller-supplied parameter rather than being baked into the loader.
 ///
 /// SCOPE NOTE: of the four condition types, "Completed Series" (Table 6-7) needs cross-series
 /// status data that doesn't exist anywhere in this codebase yet (no series-level completion
@@ -14,20 +19,40 @@ namespace Cdsi.Core.Evaluation;
 /// as Interval's reference-date resolution. Age, Interval, and Vaccine Count are fully
 /// implemented against real business rules.
 /// </summary>
+public enum ConditionalSkipContext { Evaluation, Forecast }
+
 public static class EvaluateConditionalSkip
 {
-    /// <param name="referenceDate">Per CONDSKIP-2: date administered when evaluating (this is the evaluation-side implementation; forecasting would use a different anchor).</param>
+    /// <param name="referenceDate">Evaluation context (§6.2/CONDSKIP-2): date administered. Forecast context: the assessment date - this is the caller's responsibility to supply correctly for the context requested.</param>
+    /// <param name="context">Which caller this is for - filters which top-level instances apply (§6.2 uses Evaluation/Both; §7.1 uses Forecast/Both).</param>
     /// <param name="priorDosesOfThisAntigen">This antigen's own prior administered doses, chronologically unordered is fine - used for Table 6-8's "immediate previous dose" and Table 6-9's counting.</param>
     /// <param name="resolveCompletedSeries">Caller-supplied: given a condition's SeriesGroups value, does that group have at least one relevant patient series with status 'Complete'? Not resolvable internally - see scope note above.</param>
     public static bool CanBeSkipped(
         DateOnly dateOfBirth,
         DateOnly referenceDate,
+        ConditionalSkipContext context,
         IReadOnlyList<ConditionalSkipInstance> instances,
         IReadOnlyList<PriorVaccineDoseAdministered> priorDosesOfThisAntigen,
         Func<string?, bool> resolveCompletedSeries)
     {
+        var applicableInstances = instances.Where(i => InstanceAppliesToContext(i, context)).ToArray();
+
         // ASSUMPTION (see ConditionalSkipInstance's doc comment): multiple top-level instances OR together.
-        return instances.Any(instance => InstanceCanSkip(dateOfBirth, referenceDate, instance, priorDosesOfThisAntigen, resolveCompletedSeries));
+        return applicableInstances.Any(instance => InstanceCanSkip(dateOfBirth, referenceDate, instance, priorDosesOfThisAntigen, resolveCompletedSeries));
+    }
+
+    private static bool InstanceAppliesToContext(ConditionalSkipInstance instance, ConditionalSkipContext context)
+    {
+        if (instance.Context is null)
+        {
+            return true; // no context specified - not observed in real data, but fail open rather than silently excluding it
+        }
+        if (instance.Context.Equals("Both", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        var expected = context == ConditionalSkipContext.Evaluation ? "Evaluation" : "Forecast";
+        return instance.Context.Equals(expected, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool InstanceCanSkip(

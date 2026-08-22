@@ -16,8 +16,9 @@ public class EvaluateConditionalSkipTests
         _ => throw new InvalidOperationException("Test fixture shouldn't reach a Completed Series condition.");
 
     // Real data: "Hib start at 2 months 4-dose series" Dose 2 has TWO top-level conditionalSkip
-    // instances (context Evaluation and context Forecast) - only the Evaluation one should
-    // survive the loader's context filter.
+    // instances - context Evaluation (beginAge "15 months - 4 days") and context Forecast
+    // (beginAge "15 months" exactly, no grace period). Both are loaded; CanBeSkipped's context
+    // parameter is what filters which applies.
     private static IReadOnlyList<ConditionalSkipInstance> HibDose2 =>
         HibSeries.Single(s => s.SeriesName == "Hib start at 2 months 4-dose series")
             .SeriesDoses.Single(d => d.DoseNumber == 2).ConditionalSkipInstances;
@@ -37,20 +38,48 @@ public class EvaluateConditionalSkipTests
             .SeriesDoses.Single(d => d.DoseNumber == 3).ConditionalSkipInstances;
 
     [Fact]
-    public void ContextFilter_ExcludesForecastOnlyInstances_KeepsEvaluationOnly()
+    public void AllInstancesLoadedRegardlessOfContext_BothEvaluationAndForecastPresent()
     {
-        // Real data has 2 instances (Evaluation + Forecast) on this dose; only 1 should load.
-        var instance = Assert.Single(HibDose2);
-        Assert.Equal("Evaluation", instance.Context);
+        // The loader no longer pre-filters by context (§7.1 needs Forecast/Both instances too) -
+        // filtering happens in CanBeSkipped via the context parameter instead.
+        Assert.Equal(2, HibDose2.Count);
+        Assert.Contains(HibDose2, i => i.Context == "Evaluation");
+        Assert.Contains(HibDose2, i => i.Context == "Forecast");
     }
 
     [Fact]
-    public void SingleAgeCondition_MetWhenReferenceDateAtOrAfterBeginAgeMinusFourDays()
+    public void EvaluationContext_UsesTheFourDayGracePeriodThreshold()
     {
         var dob = new DateOnly(2020, 1, 1);
-        // beginAge "15 months - 4 days" -> 2021-04-01 - 4 days = 2021-03-28.
+        // Evaluation instance: beginAge "15 months - 4 days" -> 2021-04-01 - 4 days = 2021-03-28.
         var canSkip = EvaluateConditionalSkip.CanBeSkipped(
-            dob, new DateOnly(2021, 3, 28), HibDose2, Array.Empty<PriorVaccineDoseAdministered>(), NoCompletedSeriesExpected);
+            dob, new DateOnly(2021, 3, 28), ConditionalSkipContext.Evaluation,
+            HibDose2, Array.Empty<PriorVaccineDoseAdministered>(), NoCompletedSeriesExpected);
+
+        Assert.True(canSkip);
+    }
+
+    [Fact]
+    public void ForecastContext_UsesTheExactFifteenMonthThreshold_NoGracePeriod()
+    {
+        var dob = new DateOnly(2020, 1, 1);
+        // Same reference date (2021-03-28) that satisfies Evaluation's grace-period threshold
+        // does NOT satisfy Forecast's exact "15 months" threshold (2021-04-01) - proving the
+        // context parameter genuinely selects different real data, not just a label.
+        var canSkip = EvaluateConditionalSkip.CanBeSkipped(
+            dob, new DateOnly(2021, 3, 28), ConditionalSkipContext.Forecast,
+            HibDose2, Array.Empty<PriorVaccineDoseAdministered>(), NoCompletedSeriesExpected);
+
+        Assert.False(canSkip);
+    }
+
+    [Fact]
+    public void ForecastContext_SatisfiedAtItsOwnExactThreshold()
+    {
+        var dob = new DateOnly(2020, 1, 1);
+        var canSkip = EvaluateConditionalSkip.CanBeSkipped(
+            dob, new DateOnly(2021, 4, 1), ConditionalSkipContext.Forecast,
+            HibDose2, Array.Empty<PriorVaccineDoseAdministered>(), NoCompletedSeriesExpected);
 
         Assert.True(canSkip);
     }
@@ -60,7 +89,8 @@ public class EvaluateConditionalSkipTests
     {
         var dob = new DateOnly(2020, 1, 1);
         var canSkip = EvaluateConditionalSkip.CanBeSkipped(
-            dob, new DateOnly(2021, 1, 1), HibDose2, Array.Empty<PriorVaccineDoseAdministered>(), NoCompletedSeriesExpected);
+            dob, new DateOnly(2021, 1, 1), ConditionalSkipContext.Evaluation,
+            HibDose2, Array.Empty<PriorVaccineDoseAdministered>(), NoCompletedSeriesExpected);
 
         Assert.False(canSkip);
     }
@@ -72,7 +102,8 @@ public class EvaluateConditionalSkipTests
         // Set 1's plain "12 months" age condition is satisfied well past the threshold;
         // Set 2 won't be (no relevant prior doses supplied), but OR only needs one.
         var canSkip = EvaluateConditionalSkip.CanBeSkipped(
-            dob, new DateOnly(2021, 6, 1), HibDose3, Array.Empty<PriorVaccineDoseAdministered>(), NoCompletedSeriesExpected);
+            dob, new DateOnly(2021, 6, 1), ConditionalSkipContext.Evaluation,
+            HibDose3, Array.Empty<PriorVaccineDoseAdministered>(), NoCompletedSeriesExpected);
 
         Assert.True(canSkip);
     }
@@ -87,7 +118,8 @@ public class EvaluateConditionalSkipTests
         var priorDoses = new[] { new PriorVaccineDoseAdministered("17", new DateOnly(2020, 11, 1), PriorDoseEvaluationStatus.Valid) };
 
         var canSkip = EvaluateConditionalSkip.CanBeSkipped(
-            dob, new DateOnly(2020, 12, 30), HibDose3, priorDoses, NoCompletedSeriesExpected);
+            dob, new DateOnly(2020, 12, 30), ConditionalSkipContext.Evaluation,
+            HibDose3, priorDoses, NoCompletedSeriesExpected);
 
         Assert.True(canSkip);
     }
@@ -101,7 +133,8 @@ public class EvaluateConditionalSkipTests
         // 2020-06-01: too young for either set's age condition, and the interval since the
         // 2020-05-01 prior dose (31 days) is also short of the 52-day requirement.
         var canSkip = EvaluateConditionalSkip.CanBeSkipped(
-            dob, new DateOnly(2020, 6, 1), HibDose3, priorDoses, NoCompletedSeriesExpected);
+            dob, new DateOnly(2020, 6, 1), ConditionalSkipContext.Evaluation,
+            HibDose3, priorDoses, NoCompletedSeriesExpected);
 
         Assert.False(canSkip);
     }
@@ -113,7 +146,8 @@ public class EvaluateConditionalSkipTests
         var priorDoses = new[] { new PriorVaccineDoseAdministered("18", new DateOnly(2022, 5, 10), PriorDoseEvaluationStatus.Valid) };
 
         var canSkip = EvaluateConditionalSkip.CanBeSkipped(
-            dob, new DateOnly(2022, 6, 1), RabiesRiskDose3, priorDoses, NoCompletedSeriesExpected);
+            dob, new DateOnly(2022, 6, 1), ConditionalSkipContext.Evaluation,
+            RabiesRiskDose3, priorDoses, NoCompletedSeriesExpected);
 
         Assert.True(canSkip);
     }
@@ -125,7 +159,8 @@ public class EvaluateConditionalSkipTests
         var priorDoses = new[] { new PriorVaccineDoseAdministered("18", new DateOnly(2022, 5, 10), PriorDoseEvaluationStatus.NotValid) };
 
         var canSkip = EvaluateConditionalSkip.CanBeSkipped(
-            dob, new DateOnly(2022, 6, 1), RabiesRiskDose3, priorDoses, NoCompletedSeriesExpected);
+            dob, new DateOnly(2022, 6, 1), ConditionalSkipContext.Evaluation,
+            RabiesRiskDose3, priorDoses, NoCompletedSeriesExpected);
 
         Assert.False(canSkip);
     }
@@ -139,7 +174,8 @@ public class EvaluateConditionalSkipTests
         // Reference date itself is before the set's effectiveDate (2022-05-06), so the set
         // isn't applicable at all regardless of prior doses.
         var canSkip = EvaluateConditionalSkip.CanBeSkipped(
-            dob, new DateOnly(2021, 6, 1), RabiesRiskDose3, priorDoses, NoCompletedSeriesExpected);
+            dob, new DateOnly(2021, 6, 1), ConditionalSkipContext.Evaluation,
+            RabiesRiskDose3, priorDoses, NoCompletedSeriesExpected);
 
         Assert.False(canSkip);
     }
@@ -151,7 +187,8 @@ public class EvaluateConditionalSkipTests
         var priorDoses = new[] { new PriorVaccineDoseAdministered("999-not-in-list", new DateOnly(2022, 5, 10), PriorDoseEvaluationStatus.Valid) };
 
         var canSkip = EvaluateConditionalSkip.CanBeSkipped(
-            dob, new DateOnly(2022, 6, 1), RabiesRiskDose3, priorDoses, NoCompletedSeriesExpected);
+            dob, new DateOnly(2022, 6, 1), ConditionalSkipContext.Evaluation,
+            RabiesRiskDose3, priorDoses, NoCompletedSeriesExpected);
 
         Assert.False(canSkip);
     }
@@ -160,7 +197,7 @@ public class EvaluateConditionalSkipTests
     public void NoConditionalSkipInstances_CannotBeSkipped()
     {
         var canSkip = EvaluateConditionalSkip.CanBeSkipped(
-            new DateOnly(2020, 1, 1), new DateOnly(2025, 1, 1),
+            new DateOnly(2020, 1, 1), new DateOnly(2025, 1, 1), ConditionalSkipContext.Evaluation,
             Array.Empty<ConditionalSkipInstance>(), Array.Empty<PriorVaccineDoseAdministered>(), NoCompletedSeriesExpected);
 
         Assert.False(canSkip);
