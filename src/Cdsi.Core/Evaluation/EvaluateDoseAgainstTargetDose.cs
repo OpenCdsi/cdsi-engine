@@ -116,7 +116,7 @@ public static class EvaluateDoseAgainstTargetDose
         return TargetDoseEvaluationResult.Satisfied(aggregate.Reason);
     }
 
-    private static PriorVaccineDoseAdministered MapToPriorDoseForSkipOrConflict(EvaluatedAntigenDose dose) => new(
+    internal static PriorVaccineDoseAdministered MapToPriorDoseForSkipOrConflict(EvaluatedAntigenDose dose) => new(
         dose.Cvx,
         dose.DateAdministered,
         dose.Status switch

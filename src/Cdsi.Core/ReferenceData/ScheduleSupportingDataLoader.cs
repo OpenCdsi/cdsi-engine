@@ -46,6 +46,26 @@ public static class ScheduleSupportingDataLoader
         };
     }
 
+    /// <summary>§9.1 &lt;vaccineGroups&gt; element - just the AdministerFullVaccineGroup flag per group name. See VaccineGroupInfo's doc comment for why antigen membership is derived elsewhere, not from this file.</summary>
+    public static IReadOnlyList<VaccineGroupInfo> LoadVaccineGroups(string path)
+    {
+        var doc = XDocument.Load(path);
+        var root = doc.Root ?? throw new InvalidOperationException($"'{path}' has no root element.");
+        var vgRoot = root.Element("vaccineGroups") ?? root;
+
+        return vgRoot.Elements("vaccineGroup").Select(el => new VaccineGroupInfo
+        {
+            Name = el.ElementTextOrNull("name") ?? throw new InvalidOperationException("vaccineGroup missing name."),
+            AdministerFullVaccineGroup = el.ElementTextOrNull("administerFullVaccineGroup") switch
+            {
+                null => (bool?)null,
+                "Yes" => true,
+                "No" => false,
+                var other => throw new FormatException($"Unrecognized administerFullVaccineGroup value: '{other}'")
+            }
+        }).ToArray();
+    }
+
     private static CvxMapEntry ParseCvxMapEntry(XElement el)
     {
         var cvx = el.ElementTextOrNull("cvx") ?? throw new InvalidOperationException("cvxMap entry missing cvx.");

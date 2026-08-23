@@ -22,7 +22,8 @@ Relevant Patient Series modules. Chapter 6 onward has not been written yet; see 
 | Evaluate Immunization History (§4.4 orchestrator) | §4.4 | ✅ Implemented + tested — the two-pointer target-dose/administered-dose walk, wiring all 10 Ch.6 components together with real (not caller-supplied) Interval and Vaccine Conflict resolution. Now runs across every relevant series for a patient (`EvaluatePatientSeriesHistory`), with real cross-antigen Vaccine Conflict resolution proven end-to-end. See "The orchestrator" below for what's still deferred (Recurring Dose, Completed Series) |
 | Forecast | §7 | ✅ Complete — all of §7.1-§7.6 implemented + tested (§7.1 Conditional Skip Forecast context, §7.2 Evidence of Immunity, §7.3 Contraindications, §7.4 Forecast Need, §7.5 Generate Forecast Dates incl. recommended vaccine/admin guidance/dose number, §7.6 Validate Recommendation) |
 | Select Best Patient Series | §8 | ✅ Complete — all of §8.1-8.8 implemented + tested (Pre-Filter, Identify One Prioritized, Classify Scorable, all three point-scoring tables, Select Prioritized, Determine Best) |
-| Vaccine Group Merge | §9 | ⏳ Not started |
+| Vaccine Group Merge | §9 | ✅ Complete — all of §9.1-9.3's business rules implemented + tested, including FORECASTVG-1 (containment), FORECASTVG-8 (recommended antigen), and FORECASTVG-9 (recommended vaccine aggregation) |
+| **End-to-end pipeline** | — | ✅ **Complete** — `GeneratePatientForecast` wires §4.2/§5.1 → §4.4/§6 → §7 → §8 → §9 into one call: raw administered doses in, merged vaccine group forecasts out. See "The pipeline is complete" below |
 
 ## The orchestrator (§4.4) — what it unlocked, and what's still deferred
 
@@ -216,6 +217,11 @@ src/Cdsi.Core/
                      ScoreInProcessPatientSeries (§8.5, Table 8-9),
                      ScoreNoValidDosesPatientSeries (§8.6, Table 8-11),
                      SelectPrioritizedPatientSeries (§8.7), DetermineBestPatientSeries (§8.8).
+                     Chapter 9: VaccineGroupClassification (§9.1, VACCINEGROUP-1/2),
+                     VaccineGroupForecastDates (§9.1, FORECASTVG-2..6/FORECASTDN-2),
+                     SingleAntigenVaccineGroup (§9.2),
+                     MultipleAntigenVaccineGroup (§9.3, Table 9-4/MULTIANTVG-1/FORECASTPRIORITY-1),
+                     VaccineGroupForecastAggregation (§9.1, FORECASTVG-1/8/9).
                      DoseEvaluationOutcome (shared result type for §6.4-6.9),
                      EvaluateDoseAdministeredCondition (§6.1), EvaluateConditionalSkip
                      (§6.2/§7.1, context-aware), EvaluateInadvertentVaccine (§6.3),
@@ -226,9 +232,20 @@ src/Cdsi.Core/
                      (wires 6.1-6.10 together).
   Pipeline/          OrganizeImmunizationHistory (§4.2), CreateRelevantPatientSeries (§5.1),
                      EvaluateSeriesHistory (§4.4 per-series orchestrator),
-                     EvaluatePatientSeriesHistory (§4.4 per-patient orchestrator)
+                     EvaluatePatientSeriesHistory (§4.4 per-patient orchestrator),
+                     GeneratePatientSeriesForecast (§7 per-series forecast orchestrator),
+                     SelectPrioritizedPatientSeriesForGroup (§8.1-§8.7 per-series-group
+                     orchestrator), DetermineBestPatientSeriesForAntigen (§8.8 per-antigen
+                     orchestrator), MergeVaccineGroupForecast (§9 per-vaccine-group merge),
+                     GeneratePatientForecast (the complete end-to-end pipeline — raw doses in,
+                     merged vaccine group forecasts out)
 tests/Cdsi.Core.Tests/
                      xUnit tests wired to the real bundled XML fixtures (not mocks)
+src/Cdsi.Demo/
+                     Console app: loads the FULL real 30-antigen catalog via
+                     ReferenceDataRepository and runs a few sample patients through
+                     GeneratePatientForecast end to end, printing real forecast output.
+                     `dotnet run --project src/Cdsi.Demo` from the repo root.
 data/
   antigens/          All 30 CDC AntigenSupportingData-*.xml files + XSD
   schedule/          ScheduleSupportingData.xml + XSD (CVX-to-antigen map, vaccine conflicts)
@@ -244,6 +261,128 @@ dotnet test
 
 Test fixtures are copied from `data/` into the test output directory at build time (see the
 `<None Include=...>` items in `Cdsi.Core.Tests.csproj`) — no manual setup needed.
+
+## Run the whole pipeline yourself
+
+```bash
+dotnet run --project src/Cdsi.Demo
+```
+
+Loads all 30 real antigens + the schedule via `ReferenceDataRepository` (now extended to also
+load immunity/contraindication data and vaccine groups — see below), then runs three sample
+patients — a newborn with no doses, a 2-month-old with just the HepB birth dose, and a
+15-month-old partway through the routine schedule — through `GeneratePatientForecast`,
+printing each vaccine group's status and forecast dates as real output you can read.
+
+**Couldn't be run or verified from this environment** — this sandbox has no `dotnet` runtime, so
+this hasn't been executed or checked against real output the way `dotnet test` results have been
+throughout this project. Every function it calls into has its own tests that do pass, and the
+wiring was checked field-by-field against each type's real definition before being written, but
+this specific combination — the full 30-antigen catalog, these specific sample patients — is
+genuinely unverified. If something looks off when you run it, that's real signal, not noise.
+
+`ReferenceDataRepository` was extended this round (backward compatible — existing `.AllSeries`/
+`.Schedule` usage is untouched) to also load `ImmunityByAntigen`, `ContraindicationsByAntigen`,
+and `VaccineGroups`, since the full pipeline needs all of that and the repository was the natural
+single place to build it once.
+
+### A real crash, found only by actually running the full catalog
+
+The very first run — a newborn, zero doses — crashed: `SingleAntigenVaccineGroup.Status` threw
+on a single antigen with two contained "best patient series" (§8.8) reporting genuinely
+*different* statuses (`NotRecommended` and `NotComplete`), not just redundant agreement. This
+is exactly the kind of thing that can only surface by actually running the system against real
+data at scale — no amount of unit testing individual pieces in isolation would have found it,
+since it depends on real reference data producing two disagreeing "best" series for the same
+antigen simultaneously.
+
+The fix required real judgment, not just a broader tolerance check. My first attempt at this
+(a few rounds ago) only handled *agreement* among multiple contained statuses, and threw on any
+disagreement, reasoning that disagreement must be a data inconsistency. That reasoning was
+wrong: multiple series *groups* for one antigen are alternative paths to protecting that
+antigen, not independent requirements the way multiple *antigens* in a multi-antigen vaccine
+group are. `MultipleAntigenVaccineGroup`'s "worst status dominates" cascade is correct for the
+latter (every antigen must be addressed) but wrong for the former — reporting `NotRecommended`
+because one alternative, non-chosen path happened to have nothing due right now would silently
+hide a real, actionable `NotComplete` recommendation via a different path. The fix: if *any*
+contained status is `NotComplete`, that wins outright; only when nothing is actionable does it
+fall back to the multi-antigen cascade's worst-case ordering, since at that point there's no
+recommendation left to hide.
+
+Also cleaned up an editing mistake caught immediately afterward: the first fix attempt left
+dead, unreachable code and a mismatched brace behind from an incomplete edit — caught by
+re-viewing the whole method before considering the fix done, not left for the next compile to
+surface.
+
+Existing tests updated: the old "genuinely conflicting statuses throws" test is gone (that
+behavior was wrong and has been replaced), with a new test built directly from the real crash
+scenario (`NotRecommended` + `NotComplete` → `NotComplete`) plus a worst-case-fallback test for
+when nothing is actionable.
+
+### A second real finding — RSV's 2101 date, and why it wasn't a bug
+
+The crash fix above got the pipeline running, but the newborn scenario's RSV result still
+looked wrong: `earliest 2101-08-23` — 75 years out. Real RSV data has two `Standard`-type series
+(infant, 0 days–8 months, and 75-and-older), and hand-tracing every layer of §5.1/§8.1/§8.7/§8.8's
+actual source code — three separate times — said both should become "best" and merge via `Min()`,
+with the infant's near-term date winning. Static reading alone couldn't find where that broke,
+so temporary diagnostic output was added to `Cdsi.Demo` to print the pipeline's real intermediate
+state, since only actual execution (which this sandbox can't do) could answer it.
+
+The diagnostic's answer: §8.8 was working correctly — both series genuinely became "best." The
+infant series' own forecast *status* was `NotRecommended`, not the assumed `NotComplete`, so §9's
+merge correctly excluded it from date math (a non-forecasting series contributes nothing, by
+design). The real question became: why `NotRecommended`? Checking RSV's actual XML data answered
+it — the infant series has a real, on-file seasonal window, `2025-10-01` to `2026-03-31`. The
+demo's assessment date (August 2026) was past that window's end, so `DetermineForecastNeed`
+correctly applied Table 7-10's seasonal gate. Real Influenza data showed the identical pattern in
+the identical run (`NotRecommended`, same reason) — which had been sitting in the output the
+whole time as a second, unremarked confirmation of the same real behavior.
+
+**This was not a code defect.** Every layer computed correctly; picking an off-season assessment
+date for a vaccine with a wide infant/older-adult population split produced a technically-correct
+but confusing-looking result, since the *only* contributing series to the merge happened to be
+the wrong population's. Fixed by picking a demo assessment date (`2026-01-15`) that falls inside
+both RSV's and Influenza's real on-file seasonal windows, and by removing the diagnostic block
+now that it had done its job. No source logic changed as a result of this investigation — only
+the demo's own chosen date.
+
+Worth remembering for anyone reading this pipeline's output going forward: a vaccine group's
+merged forecast reflects only its currently-*forecasting* contained series. If the population or
+season you expected to see isn't reflected, that's a real signal to check that specific series'
+own status and reason, not necessarily a pipeline bug.
+
+### A user-requested addition: `AllPreferableVaccineCvxCodes`
+
+Running the demo surfaced a genuine, real usability question: `RecommendedVaccineCvxCodes` was
+empty for almost every antigen in the output, with Pneumococcal the lone exception. Checked
+against real data before answering: `FORECASTRECVAC-1` correctly requires a vaccine's
+`forecastVaccineType` flag to be `'Y'` before it counts as "recommended," and only 347 of 1089
+real `preferableVaccine` entries across the whole dataset are flagged that way — confirmed
+concretely for the doses this demo actually forecasts (HepB, Hib, and Polio's Dose 1 are all
+`'N'` across every listed vaccine; Pneumococcal's Dose 1 happens to be the one with both entries
+flagged `'Y'`). That's not a gap — CDC's own data deliberately distinguishes "safe to
+auto-suggest" from "leave to clinical judgment," and forcing every dose to show a recommendation
+would misrepresent that real distinction.
+
+What *was* a genuine, worthwhile addition: `DetermineRecommendedVaccine.IsRecommendedSeriesDoseVaccine`
+(the literal `FORECASTRECVAC-1` rule) was refactored to delegate to a new, non-spec-named
+`IsPlausibleSeriesDoseVaccine` - the same age-window/contraindication check, without the
+`forecastVaccineType='Y'` gate. `PatientSeriesForecastResult` and `VaccineGroupForecastResult`
+both now carry a parallel `AllPreferableVaccineCvxCodes` field alongside the existing
+`RecommendedVaccineCvxCodes`, giving callers the fuller picture — "everything clinically valid
+for this dose" versus "what CDC specifically flags as a default suggestion" — without changing
+what "recommended" means anywhere in the existing pipeline. The refactor is behavior-preserving
+for the existing function; all of its existing tests hold unchanged.
+
+**A real bug caught before it shipped, by checking rather than assuming**: the first draft
+computed per-vaccine contraindication status via `.ToDictionary(pv => pv.Cvx, ...)`, reused
+across both the recommended and plausible lists. Sweeping all 30 files first (a habit that keeps
+paying off) found 9 real cases where a single dose lists the *same* CVX more than once with
+different age windows or trade names - Influenza's own standard series among them. That
+dictionary construction would have thrown on every one of them. Fixed by keying on the vaccine
+*entry* (via a list of tuples) rather than deduplicating by CVX, which both avoids the crash and
+correctly preserves age-window-specific entries that happen to share a CVX.
 
 ## Design notes worth knowing before you extend this
 
@@ -646,31 +785,254 @@ three point-scoring tables (Complete/In-Process/No Valid Doses), Select Prioriti
 Determine Best. Alongside the completed Chapters 6 and 7, that's evaluation, forecasting, and
 now series selection all built and proven.
 
+## §9.1/§9.2: starting the final chapter
+
+**A real, load-bearing data-source correction, caught before writing a single line of
+classification logic**: the Schedule file's `vaccineGroupToAntigenMap` table looks like the
+obvious source for "which antigens does this vaccine group cover" — but checking it against
+real data first showed it's incomplete for genuine multi-antigen groups. It lists `"MMR" ->
+"Measles"` and `"DTaP/Tdap/Td" -> "Diphtheria"` — one antigen each, dropping Mumps/Rubella and
+Tetanus/Pertussis entirely, even though the spec's own narrative text explicitly calls both out
+as multi-antigen groups. The complete, verified-consistent source turned out to be each antigen
+file's *own* `<series><vaccineGroup>` field — already parsed into `AntigenSeries.VaccineGroup`
+since early in this project, for an entirely different reason. Grouping all 30 antigen files by
+that field recovers the correct membership (`MMR` = Measles+Mumps+Rubella, `DTaP/Tdap/Td` =
+Diphtheria+Tetanus+Pertussis) and confirms every other real vaccine group is genuinely
+single-antigen. `VaccineGroupClassification.Classify` is deliberately a pure function over a
+pre-derived antigen list rather than something that reads the Schedule table itself, so it can't
+silently regress to the incomplete source.
+
+The Schedule file's `<vaccineGroups>` element *is* the right source for one thing:
+`administerFullVaccineGroup` (needed by `FORECASTDN-2`). Real data: only 2 of 26 groups specify
+it at all — MMR is `"Yes"`, DTaP/Tdap/Td is `"No"` — every single-antigen group leaves it unset,
+which makes sense once you notice `FORECASTDN-2`'s MIN/MAX choice is only meaningful when a
+group's forecast could be built from more than one contained forecast.
+
+§9.1's date-aggregation rules (`FORECASTVG-2` through `6`) deliberately don't compute the vaccine
+group's own `EarliestDate` themselves — that's genuinely §9.2's or §9.3's job (single-antigen is
+a trivial pass-through; multi-antigen needs the "priority patient series forecast" concept,
+deferred to next round), so it's taken as an already-resolved parameter here rather than
+guessed at or duplicated.
+
+§9.2 (`SINGLEANTVG-1/2`) is about as small as a sub-step gets in this whole project — a status
+pass-through and a MIN over dates — which is exactly right for the "trivial" case a single
+antigen vaccine group represents.
+
+## §9.3 Multiple Antigen Vaccine Group — core Chapter 9 logic complete
+
+**Another real terminology mismatch, caught by grounding before coding**: the spec's own text
+describes `FORECASTPRIORITY-1`'s condition as an "interval priority flag" set to `'Y'`. Swept
+all 490 real preferable-interval rules across every file before writing anything against it —
+the literal string `"Y"` never appears even once. The only non-empty value in the entire dataset
+is `"override"` (30 real instances, concentrated in Pertussis — fitting, since Pertussis belongs
+to the real `DTaP/Tdap/Td` multi-antigen group this section exists for). `IsPriorityOverride`
+treats `"override"` as the real-world equivalent of the spec's described `'Y'` state, since
+nothing else in the data could plausibly mean anything different — flagged as an inference
+grounded in exhaustive real-data coverage, not a quoted definition.
+
+Table 9-4's status cascade turned out clean once translated out of decision-table form: it's a
+strict priority order (`Contraindicated` → `AgedOut` → `NotRecommended` → `NotComplete` → all
+`Immune` → `Complete`), each condition checked only after every earlier one has failed. Worth
+noting for a future reader: the final `Complete` fallback needs no explicit "are they all
+Complete or Immune?" check of its own — by the time the cascade reaches it, every other status
+has already been ruled out and "not all Immune" has been confirmed, so nothing but Complete/
+Immune could remain among the contained forecasts.
+
+**Core Chapter 9 logic is now complete**: classification (§9.1), date/dose-number aggregation
+(§9.1), the single-antigen trivial case (§9.2), and the multiple-antigen status cascade plus
+priority-forecast/earliest-date rules (§9.3) are all implemented and tested against real CDC
+data.
+
+## §9.1 finished: FORECASTVG-1/8/9 — Chapter 9 rule logic complete
+
+The three pieces held back from the earlier §9.1 round turned out to be genuinely small, as
+expected: `FORECASTVG-1` (containment) is a plain 3-condition AND; `FORECASTVG-8` (recommended
+antigen) is a 2-condition AND; `FORECASTVG-9` (recommended vaccine aggregation) is a filter,
+flatten, and dedupe over already-built §7.5 output (`DetermineRecommendedVaccine`'s CVX codes).
+`FORECASTVG-7` (forecast reasons) needed no function at all, for the same reason `SELECTBEST-1`
+didn't back in §8.7 — both are literally "collect this field from every contained forecast,"
+not a decision.
+
+**Every individual business rule across §6, §7, §8, and §9 is now implemented and tested against
+real CDC data.** What remains before this is a running end-to-end pipeline is the deferred
+orchestration work flagged throughout §8 and §9: computing every relevant series' forecast,
+selecting best patient series per series group, and merging them into vaccine group forecasts —
+wiring together dozens of already-proven pure functions into one patient-level walk, the same
+shape of work `EvaluateSeriesHistory`/`EvaluatePatientSeriesHistory` did for Chapter 6.
+
+## The §7 per-series forecast orchestrator
+
+The first real piece of the deferred orchestration work: `GeneratePatientSeriesForecast` wires
+together §7.1 (Conditional Skip, Forecast context), §7.2 (Evidence of Immunity), §7.3
+(Contraindications), §7.4 (Determine Forecast Need), §7.5 (all of Generate Forecast Dates -
+core dates, recommended vaccine, dose number, guidance), and §7.6 (Validate Recommendation) on
+top of one series' Chapter 6 evaluation output (`SeriesHistoryResult`). §8's cross-series-group
+selection and §9's vaccine group merge remain separate, larger pieces on top of this one.
+
+**A real bug caught and fixed before it shipped, not discovered later as a flaky test**: my
+first draft stubbed the interval reference-date resolver as `_ => null` in the six-date
+calculation, while the candidate-earliest-date calculation used the real resolver — meaning
+`latestEarliestRecIntervalDate`/`latestLatestRecIntervalDate` would have silently always
+returned null, even when real interval data existed to resolve them. Fixed by extracting one
+shared `BuildIntervalReferenceResolver` used consistently by both calculations, rather than two
+copies that could quietly drift apart. Every function signature this orchestrator calls into
+was also individually re-verified against its actual source before wiring it in, rather than
+trusted from memory of having written it several rounds ago.
+
+Two inputs remain caller-supplied, matching gaps flagged since §7.5 was first built:
+`latestConflictEndDate` and `latestInadvertentAdministrationDate` need forward-looking
+calculations (a "will this future dose conflict with what's already given" check, and
+inadvertent-administration tracking) that don't exist yet - both are optional parameters,
+defaulting to null, which the candidate earliest date calculation already treats as "skip this
+component," not a sentinel.
+
+**A genuinely useful real-data finding surfaced while building the capstone test, not
+invented**: every real `preferableVaccine` entry for HepB Dose 3 has `forecastVaccineType`
+`"N"` - none are forecast-eligible. Checked this *before* writing the test's assertion (having
+just been burned by a similar near-miss with `DetermineRecommendedVaccine` a few rounds back),
+so the capstone test correctly expects an *empty* recommended-vaccines list for that fixture,
+with a second, separate test reusing the real MenB-4C fixture (already proven `Y`-flagged) to
+demonstrate the pipeline actually surfaces a recommended vaccine when one exists.
+
+## The §8 per-series-group orchestrator
+
+The natural next layer: `SelectPrioritizedPatientSeriesForGroup` runs the *entire* §8.1-§8.7
+pipeline (Pre-Filter → Identify One Prioritized shortcut → Classify Scorable → whichever of
+§8.4/8.5/8.6 applies → Select Prioritized) for one series group, using this project's own
+Chapter 6/7 orchestrators as its input. §8.8's cross-group logic (which needs every group's
+prioritized series for an antigen, cross-referenced via `equivalentSeriesGroups`) remains a
+further layer on top of this one, not included here.
+
+**A real bug caught by hand-tracing the code before testing, not by a failing assertion**: my
+first draft computed a series' earliest-valid-dose-date with `.DefaultIfEmpty().Cast<DateOnly?>()`
+over a non-nullable `IEnumerable<DateOnly>`. `DefaultIfEmpty()` on a non-nullable sequence
+inserts `default(DateOnly)` — `0001-01-01` — not null, so a series with zero satisfied doses
+would have silently returned a bogus non-null date instead of the `null` the return type's own
+contract implied. It happened to be harmless at the one call site that existed at the time
+(guarded by a `ValidDoseCount > 0 &&` check that never lets the bogus value get read), but
+relying on incidental protection at a single call site isn't a fix, just a reason it hadn't bitten
+yet. Rewrote it as a plain length-check instead.
+
+**A second real bug, caught while hand-verifying the test fixtures rather than assuming they'd
+work**: the first draft of the test suite used a fixed absolute date (`2020-01-01`) for every
+synthetic "valid dose," independent of whatever DOB each test used. Checking the real
+`maxAgeToStart` values for the two HepB series involved (both genuinely 19 years) showed that
+date landed *past* the threshold relative to the test's own DOB — which would have silently
+routed several tests through the wrong code path (the "no scorable series, fall back to default"
+branch) while still passing, for the wrong reason, because the default series test happened to
+share a name with what the test was trying to prove. Fixed by making dose dates DOB-relative
+instead of a fixed calendar date, then re-traced all five tests by hand against the actual
+`PreFilterPatientSeries`/`IdentifyOnePrioritizedPatientSeries` logic before trusting them.
+
+## §8.8: Chapter 8's orchestration complete
+
+**A real compile error shipped and caught by the person running `dotnet test`, not by me** —
+worth being upfront about rather than glossing over. `SelectPrioritizedPatientSeriesForGroup`
+used `.Count` (property syntax) on `T[]` array-typed locals in two places; arrays don't expose a
+`Count` property directly (only `.Length`), so the compiler resolved the bare `.Count` to the
+`Enumerable.Count` extension method *group* instead, which then failed to compile against `==`
+and as a method argument. Fixed both occurrences to `.Length`, then swept the rest of that file
+and `GeneratePatientSeriesForecast.cs` by hand-checking every remaining `.Count` usage against
+its actual declared type (all turned out to be genuine `IReadOnlyList<T>` properties, which do
+support `.Count` correctly), and ran a repo-wide pattern search for the same mistake shape
+before calling it fixed. This round's new file was checked against the identical pattern before
+being shipped.
+
+`DetermineBestPatientSeriesForAntigen` is the piece that finally closes out Chapter 8's
+orchestration: it groups a patient's relevant series for one antigen by `SeriesGroupInfo.SeriesGroup`,
+runs `SelectPrioritizedPatientSeriesForGroup` once per group, then cross-references each group's
+own prioritized series against its `equivalentSeriesGroups` counterpart via
+`DetermineBestPatientSeries` to decide the antigen's final "best patient series" set — which, per
+the chapter's own framing, can genuinely contain more than one series or none at all.
+
+Tested against HepB's real, complete bidirectional equivalence pair — "HepB 3-dose series"
+(group 1, Standard, `equivalent="2"`) and "HepB risk 3-dose series" (group 2, Risk,
+`equivalent="1"`) — including a case that traces exactly why a complete Standard series makes
+its equivalent incomplete Risk series correctly drop out of the "best" set (already covered,
+not needed), and a single-group case proving the orchestrator doesn't crash or misbehave when a
+series' `equivalentSeriesGroups` points at a group that simply isn't part of the current input.
+Every test's expected outcome was hand-traced against the real `EquivalentSeriesGroup` values
+and Table 8-14's four columns before being written, not inferred from what "seemed right."
+
+**With this, all of Chapter 8's orchestration is built**: `SelectPrioritizedPatientSeriesForGroup`
+(§8.1-§8.7, per series group) and `DetermineBestPatientSeriesForAntigen` (§8.8, per antigen) sit
+on top of `GeneratePatientSeriesForecast` (§7, per series), which sits on top of
+`EvaluateSeriesHistory`/`EvaluatePatientSeriesHistory` (§4.4/§6). Only a §9 vaccine-group-merge
+orchestrator remains before every chapter has both its rules AND its wiring complete.
+
+## The pipeline is complete: `GeneratePatientForecast`
+
+**This is the moment the whole project has been building toward.** `GeneratePatientForecast`
+takes a patient and their raw administered dose history and produces merged vaccine group
+forecasts — genuinely wiring together every layer built across this entire project: §4.2/§5.1
+(organize history, find relevant series) → §4.4/§6 (evaluate immunization history, via
+`EvaluatePatientSeriesHistory`) → §7 (forecast each series, via `GeneratePatientSeriesForecast`)
+→ §8 (select best patient series, via `SelectPrioritizedPatientSeriesForGroup` and
+`DetermineBestPatientSeriesForAntigen`) → §9 (merge into vaccine group forecasts, via the new
+`MergeVaccineGroupForecast`). Raw doses in, a real forecast out — no mocks, no stand-ins,
+anywhere in that chain.
+
+**A real design gap discovered only by building the top-level orchestrator, not visible from
+any single layer in isolation**: a single ANTIGEN vaccine group (like HepB) can legitimately
+have more than one "best patient series" simultaneously — e.g. HepB's Standard and Risk series
+groups both independently resolving to Complete via §8.8's Column 1 at the same time. That's not
+a data inconsistency, it's redundant agreement. But `SingleAntigenVaccineGroup.Status` had been
+built several rounds ago with a strict `.Single()`, which would have thrown on this entirely
+real, reachable scenario. Fixed to tolerate multiple contained statuses that agree, while still
+throwing loudly on a genuine disagreement (e.g. one Complete, one NotComplete) — a real
+inconsistency SINGLEANTVG-1's own singular phrasing doesn't anticipate. This is exactly the kind
+of gap that only surfaces once pieces actually run together, not from testing any one piece in
+isolation — the reason this integration step mattered on its own, not just as glue code.
+
+**An honest scoping decision in the end-to-end tests, made because of a real constraint**: this
+sandbox has no `dotnet` runtime, so nothing here can be executed and empirically verified the
+way `dotnet test` on your machine can. Real HepB has 10 Standard-type series competing in one
+series group; for a patient with no active observations, all 10 become simultaneously relevant
+and would genuinely compete in §8's scoring. Rather than assert an exact `EarliestDate` or dose
+number for a 10-way competition I have no way to actually run and check, the end-to-end tests
+deliberately scope the antigen catalog down to the single series already hand-verified in
+isolation last round. The pipeline still runs every real stage genuinely end-to-end — this is a
+scoping choice about what can be safely asserted here, not a limitation of the pipeline itself.
+Running the true, full 18-series HepB catalog through this pipeline and confirming which series
+actually wins is real, valuable follow-up work once you run it against a real `dotnet` runtime.
+
+**With this, every chapter this project set out to build — §6 Evaluation, §7 Forecast, §8 Select
+Best Patient Series, §9 Vaccine Group Merge — has both its business rules AND its end-to-end
+orchestration built and tested against real CDC data.** What's left is genuinely a different
+phase: the handful of documented, deliberately-deferred gaps (forward-looking conflict/
+inadvertent-administration dates, multi-antigen priority-forecast wiring, running the full
+antigen catalog through the pipeline for real), and then `Cdsi.Api` — turning this into an
+actual running service.
+
 ## Next steps
 
-1. All 10 Chapter 6 logical components — ✅ done.
-2. §4.4 per-series and per-patient orchestrators — ✅ done, real Interval and cross-antigen
-   Vaccine Conflict resolution proven end-to-end. Recurring Dose and Completed Series remain
-   documented gaps (see above).
-3. **Chapter 7 Forecast (§7.1-§7.6) — ✅ complete.** All six sub-steps implemented and tested
-   against real CDC data: Conditional Skip (Forecast context), Evidence of Immunity,
-   Contraindications, Forecast Need, Generate Forecast Dates (core 6-date calculation,
-   recommended vaccine, admin guidance, forecast dose number), and Validate Recommendation.
-4. Still open within §7.5's date calculation specifically: wiring `latestConflictEndDate`/
-   `latestInadvertentAdministrationDate`/`mostRecentAdministeredDate` from the orchestrator's
-   tracked history instead of taking them as caller-supplied parameters — a real but small
-   follow-up, not a new problem.
-5. **Chapter 8 Select Best Patient Series (§8.1-§8.8) — ✅ complete.** All eight sub-steps
-   implemented and tested against real CDC data: Pre-Filter, Identify One Prioritized, Classify
-   Scorable, all three point-scoring tables (Complete/In-Process/No Valid Doses), Select
-   Prioritized, and Determine Best — including the foundational Series Group data model
-   (`selectSeries`) that nothing before this chapter needed.
-6. A genuine orchestration piece is still open, deliberately deferred throughout Chapter 8: a
-   per-antigen walk that (a) computes every series group's prioritized series via §8.1-8.7,
-   then (b) cross-references each group's `equivalentSeriesGroups` to run §8.8 and produce the
-   final "one or more best patient series" set. Every §8.x function is pure and already tested
-   in isolation; this is the wiring step, same shape as `EvaluateSeriesHistory` was for Chapter
-   6's ten components.
-7. §9 Vaccine Group Merge — the next chapter, and the last piece of core CDSi logic (§4-§9)
-   before this becomes an API.
-8. `Cdsi.Api` (ASP.NET) + real Dockerfile target once the pipeline is complete.
+**The end-to-end pipeline is complete.** Every chapter this project set out to build — §6
+Evaluation, §7 Forecast, §8 Select Best Patient Series, §9 Vaccine Group Merge — has both its
+business rules and its orchestration implemented and tested against real CDC data, wired
+together into one call (`GeneratePatientForecast`): raw administered doses in, merged vaccine
+group forecasts out.
+
+What remains, roughly in order of what's most valuable next:
+
+1. **Run the full antigen catalog through the pipeline for real.** The end-to-end tests in this
+   sandbox deliberately scope the series catalog down to a single already-verified series per
+   test, since this environment has no `dotnet` runtime to empirically check a genuine 10-way
+   series competition (real HepB alone has 10 competing Standard series in one series group).
+   Running `GeneratePatientForecast` against the true, full 30-antigen catalog on a real machine
+   — and confirming the results make sense — is the natural next validation step.
+2. **Close the remaining documented gaps**, none of which block the pipeline from running, all
+   of which affect specific real scenarios:
+   - `latestConflictEndDate`/`latestInadvertentAdministrationDate` (§7.5's `FORECASTDTCAN-1`)
+     remain unset - need forward-looking "will this future dose conflict" and inadvertent-
+     administration-tracking calculations that don't exist yet.
+   - `anyContainedIsPriorityForecast`/`latestAdministeredDateOfGroupVaccineTypes` (§9.3's
+     `MULTIANTVG-1`) default to false/null for multi-antigen vaccine groups (MMR, DTaP/Tdap/Td) -
+     wiring `FORECASTPRIORITY-1` and the patient's group-wide dose history through would resolve
+     these for real.
+   - Recurring Dose (Td/flu/COVID-style series) isn't implemented in the §4.4 orchestrator.
+   - §6.2's Completed Series condition still needs a real resolver, now that §8 exists to
+     determine what "complete" means for a series group.
+   - §9.1's `FORECASTVG-7` needed no code (confirmed, not a gap) but §7's admin guidance and
+     §9's reason aggregation could use a closer look once real multi-series scenarios are run.
+3. `Cdsi.Api` (ASP.NET) + a real Dockerfile target — turning `GeneratePatientForecast` into an
+   actual running service, the last major phase of this project.

@@ -1,0 +1,233 @@
+using Cdsi.Core.Common;
+using Cdsi.Core.Evaluation;
+using Cdsi.Core.Models;
+using Cdsi.Core.ReferenceData;
+
+namespace Cdsi.Core.Pipeline;
+
+/// <summary>The full §7 forecast for one relevant patient series - the per-series orchestration output this project has been building toward since Chapter 7 began.</summary>
+public sealed class PatientSeriesForecastResult
+{
+    public required PatientSeriesStatus Status { get; init; }
+    public required string StatusReason { get; init; }
+    public required bool ShouldForecast { get; init; }
+
+    /// <summary>Null when ShouldForecast is false - a Complete/Immune/Contraindicated/etc. series has nothing to forecast dates for.</summary>
+    public PatientSeriesForecastDates? Dates { get; init; }
+
+    public IReadOnlyList<string> RecommendedVaccineCvxCodes { get; init; } = Array.Empty<string>();
+
+    /// <summary>Not a named CDSi field - every clinically valid (correct age window, not contraindicated) preferable vaccine for this dose, regardless of CDC's own forecastVaccineType='Y' auto-suggest flag. See DetermineRecommendedVaccine.IsPlausibleSeriesDoseVaccine's doc comment for why this exists: most real doses (~68% of the dataset) have zero flag='Y' entries, so RecommendedVaccineCvxCodes alone is often empty even when valid options exist.</summary>
+    public IReadOnlyList<string> AllPreferableVaccineCvxCodes { get; init; } = Array.Empty<string>();
+
+    public int? ForecastDoseNumber { get; init; }
+    public IReadOnlyList<string> Guidance { get; init; } = Array.Empty<string>();
+
+    /// <summary>§7.6 Validate Recommendation - null when not applicable (not forecasting).</summary>
+    public bool? IsValidRecommendation { get; init; }
+}
+
+/// <summary>
+/// Wires together nearly all of Chapter 7's sub-pieces (§7.1-§7.6) on top of one series'
+/// Chapter 6 evaluation output (SeriesHistoryResult), producing one complete forecast. This is
+/// the per-series orchestration layer promised throughout this project's Chapter 7/8/9 work -
+/// the Chapter 8 (select best patient series across series groups) and Chapter 9 (merge into
+/// vaccine group forecasts) orchestration layers are still separate, larger pieces on top of
+/// this one, not included here.
+///
+/// TWO INPUTS REMAIN CALLER-SUPPLIED, matching the gaps already flagged in §7.5's own README
+/// notes - `latestConflictEndDate` and `latestInadvertentAdministrationDate` feed
+/// FORECASTDTCAN-1's candidate earliest date calculation but need forward-looking calculations
+/// (a "will this future dose conflict with what's already been given" check, and inadvertent-
+/// administration tracking) that don't exist yet. Pass null for either until they do - the
+/// candidate earliest date calculation already treats null components as "skip," not a sentinel.
+/// </summary>
+public static class GeneratePatientSeriesForecast
+{
+    public static PatientSeriesForecastResult Execute(
+        Patient patient,
+        AntigenSeries series,
+        SeriesHistoryResult seriesHistory,
+        DateOnly assessmentDate,
+        AntigenImmunityData immunityData,
+        AntigenContraindicationData contraindicationData,
+        Func<string?, bool> resolveCompletedSeries,
+        DateOnly? latestConflictEndDate = null,
+        DateOnly? latestInadvertentAdministrationDate = null)
+    {
+        var hasNotSatisfiedTargetDose = !seriesHistory.SeriesComplete;
+        var hasSatisfiedTargetDose = seriesHistory.AllEvaluatedDoses.Any(d => d.SatisfiedTargetDoseNumber is not null);
+
+        var currentTargetDose = seriesHistory.CurrentTargetDoseNumber is int doseNumber
+            ? series.SeriesDoses.SingleOrDefault(d => d.DoseNumber == doseNumber)
+            : null;
+
+        // Contraindication/immunity/age only meaningfully apply when there's a next target dose
+        // to evaluate them against - a Complete series (no current target dose) has nothing to
+        // check them against, and DetermineForecastNeed's own cascade already resolves such a
+        // series to "Complete" via hasSatisfiedTargetDose alone once these are left at their
+        // "doesn't apply" defaults (false / unbounded / null).
+        var hasEvidenceOfImmunity = currentTargetDose is not null && EvaluateEvidenceOfImmunity.HasEvidenceOfImmunity(patient, immunityData);
+        var isContraindicated = currentTargetDose is not null && IsSeriesContraindicated(patient, assessmentDate, currentTargetDose, contraindicationData);
+
+        var maxAgeDate = new DateOnly(2999, 12, 31);
+        DateOnly? candidateEarliestDate = null;
+        SeasonalRecommendation? seasonalRecommendation = null;
+
+        if (currentTargetDose is not null)
+        {
+            var applicableAge = currentTargetDose.AgeRules.Count > 0
+                ? TemporalRuleSelector.SelectApplicable(currentTargetDose.AgeRules, assessmentDate)
+                : null;
+            var minAgeDate = applicableAge?.MinAgeDate(patient.DateOfBirth);
+            maxAgeDate = applicableAge?.MaxAgeDate(patient.DateOfBirth) ?? maxAgeDate;
+            seasonalRecommendation = currentTargetDose.SeasonalRecommendation;
+
+            var resolveIntervalReference = BuildIntervalReferenceResolver(seriesHistory);
+
+            var latestMinIntervalDate = ForecastIntervalDates.LatestMinIntervalDate(
+                assessmentDate, currentTargetDose.PreferableIntervals,
+                rule => resolveIntervalReference(rule.ReferenceType, rule.ReferenceTargetDoseNumber, rule.ReferenceVaccineCvxCodes));
+            var mostRecentAdministeredDate = seriesHistory.AllEvaluatedDoses.Count > 0
+                ? seriesHistory.AllEvaluatedDoses.Max(d => d.DateAdministered)
+                : (DateOnly?)null;
+            var seasonalStart = seasonalRecommendation?.StartDate ?? new DateOnly(1900, 1, 1);
+
+            candidateEarliestDate = GenerateForecastDates.CalculateCandidateEarliestDate(
+                minAgeDate, latestMinIntervalDate, latestConflictEndDate, seasonalStart,
+                latestInadvertentAdministrationDate, mostRecentAdministeredDate);
+        }
+
+        var forecastNeed = DetermineForecastNeed.Execute(
+            hasNotSatisfiedTargetDose, hasSatisfiedTargetDose, hasEvidenceOfImmunity, isContraindicated,
+            assessmentDate, seasonalRecommendation, maxAgeDate, candidateEarliestDate);
+
+        if (!forecastNeed.ShouldForecast || currentTargetDose is null)
+        {
+            return new PatientSeriesForecastResult
+            {
+                Status = forecastNeed.PatientSeriesStatus,
+                StatusReason = forecastNeed.Reason,
+                ShouldForecast = false
+            };
+        }
+
+        var dates = CalculateForecastDates(patient, currentTargetDose, seriesHistory, candidateEarliestDate!.Value, maxAgeDate);
+
+        // Computed once per preferable vaccine ENTRY (not deduplicated by CVX - real data has
+        // doses where the same CVX appears more than once with different age windows, e.g.
+        // Influenza's own standard series, confirmed by sweeping all 30 files before trusting
+        // this), then reused for both the spec-faithful "recommended" (flag='Y' only) list and
+        // the additive "plausible" (any clinically valid option) list.
+        var vaccinesWithContraindicationStatus = currentTargetDose.PreferableVaccines
+            .Select(pv => (Vaccine: pv, IsContraindicated: IsVaccineTypeContraindicated(patient, assessmentDate, pv.Cvx, contraindicationData)))
+            .ToArray();
+
+        var recommendedVaccines = vaccinesWithContraindicationStatus
+            .Where(x => DetermineRecommendedVaccine.IsRecommendedSeriesDoseVaccine(
+                x.Vaccine, x.IsContraindicated, patient.DateOfBirth, dates.EarliestDate, dates.AdjustedRecommendedDate))
+            .Select(x => x.Vaccine.Cvx)
+            .Distinct()
+            .ToArray();
+
+        var allPlausibleVaccines = vaccinesWithContraindicationStatus
+            .Where(x => DetermineRecommendedVaccine.IsPlausibleSeriesDoseVaccine(
+                x.Vaccine, x.IsContraindicated, patient.DateOfBirth, dates.EarliestDate, dates.AdjustedRecommendedDate))
+            .Select(x => x.Vaccine.Cvx)
+            .Distinct()
+            .ToArray();
+
+        var forecastDoseNumber = DetermineForecastDoseNumber.Execute(
+            seriesHistory.AllEvaluatedDoses
+                .Where(d => d.SatisfiedTargetDoseNumber is not null)
+                .Select(d => new SatisfiedTargetDoseInfo(
+                    d.DateAdministered,
+                    series.SeriesDoses.SingleOrDefault(sd => sd.DoseNumber == d.SatisfiedTargetDoseNumber!.Value)?.SeasonalRecommendation?.StartDate))
+                .ToArray());
+
+        var guidance = GenerateForecastGuidance.Execute(series, patient, contraindicationData.AntigenLevel, contraindicationData.VaccineLevel);
+
+        var priorForSkip = seriesHistory.AllEvaluatedDoses.Select(EvaluateDoseAgainstTargetDose.MapToPriorDoseForSkipOrConflict).ToArray();
+        var isValid = ValidateRecommendation.IsValid(
+            patient.DateOfBirth, dates.EarliestDate, currentTargetDose.ConditionalSkipInstances, priorForSkip, resolveCompletedSeries);
+
+        return new PatientSeriesForecastResult
+        {
+            Status = forecastNeed.PatientSeriesStatus,
+            StatusReason = forecastNeed.Reason,
+            ShouldForecast = true,
+            Dates = dates,
+            RecommendedVaccineCvxCodes = recommendedVaccines,
+            AllPreferableVaccineCvxCodes = allPlausibleVaccines,
+            ForecastDoseNumber = forecastDoseNumber,
+            Guidance = guidance,
+            IsValidRecommendation = isValid
+        };
+    }
+
+    private static bool IsSeriesContraindicated(Patient patient, DateOnly assessmentDate, SeriesDose targetDose, AntigenContraindicationData contraindicationData)
+    {
+        var anyAntigenContraindicationApplies = contraindicationData.AntigenLevel
+            .Any(rule => EvaluateContraindications.EvaluateAntigenContraindication(patient, assessmentDate, rule) == ContraindicationApplicability.Applies);
+
+        var preferableVaccines = targetDose.PreferableVaccines;
+        var allPreferableVaccinesContraindicated = preferableVaccines.Count > 0 && preferableVaccines.All(pv =>
+            IsVaccineTypeContraindicated(patient, assessmentDate, pv.Cvx, contraindicationData));
+
+        return EvaluateContraindications.IsContraindicatedPatientSeries(anyAntigenContraindicationApplies, allPreferableVaccinesContraindicated);
+    }
+
+    private static bool IsVaccineTypeContraindicated(Patient patient, DateOnly assessmentDate, string cvx, AntigenContraindicationData contraindicationData) =>
+        contraindicationData.VaccineLevel.Any(rule =>
+            EvaluateContraindications.EvaluateVaccineContraindication(patient, assessmentDate, cvx, rule) == ContraindicationApplicability.Applies);
+
+    /// <summary>
+    /// Builds the CALCDTINT-1/2/8/9 reference-date resolver shared by both the candidate
+    /// earliest date calculation and the recommended-date/past-due-date calculation - the same
+    /// interval reference points must resolve consistently across both, so this is built once
+    /// per series-forecast call rather than reimplemented (and risking drifting apart) in two
+    /// places.
+    /// </summary>
+    private static Func<IntervalReferenceType, int?, IReadOnlyList<string>, DateOnly?> BuildIntervalReferenceResolver(SeriesHistoryResult seriesHistory)
+    {
+        var priorThisAntigen = seriesHistory.AllEvaluatedDoses;
+        var targetDoseSatisfiedDates = priorThisAntigen
+            .Where(d => d.SatisfiedTargetDoseNumber is not null)
+            .ToDictionary(d => d.SatisfiedTargetDoseNumber!.Value, d => d.DateAdministered);
+
+        return (type, targetDoseNumber, cvxCodes) => type switch
+        {
+            IntervalReferenceType.FromPrevious => priorThisAntigen
+                .Where(d => d.Status is EvaluationStatus.Valid or EvaluationStatus.NotValid)
+                .OrderByDescending(d => d.DateAdministered).FirstOrDefault()?.DateAdministered,
+            IntervalReferenceType.FromTargetDose => targetDoseNumber is int tn && targetDoseSatisfiedDates.TryGetValue(tn, out var d) ? d : null,
+            IntervalReferenceType.FromMostRecent => priorThisAntigen
+                .Where(pd => cvxCodes.Contains(pd.Cvx) && pd.Status != EvaluationStatus.Extraneous)
+                .OrderByDescending(pd => pd.DateAdministered).FirstOrDefault()?.DateAdministered,
+            IntervalReferenceType.FromRelevantObservation => null,
+            _ => null
+        };
+    }
+
+    private static PatientSeriesForecastDates CalculateForecastDates(
+        Patient patient, SeriesDose currentTargetDose, SeriesHistoryResult seriesHistory, DateOnly candidateEarliestDate, DateOnly maxAgeDate)
+    {
+        var applicableAge = currentTargetDose.AgeRules.Count > 0
+            ? TemporalRuleSelector.SelectApplicable(currentTargetDose.AgeRules, candidateEarliestDate)
+            : null;
+
+        var resolveIntervalReference = BuildIntervalReferenceResolver(seriesHistory);
+
+        return GenerateForecastDates.Execute(
+            candidateEarliestDate,
+            earliestRecAgeDate: applicableAge?.EarliestRecAgeDate(patient.DateOfBirth),
+            latestEarliestRecIntervalDate: ForecastIntervalDates.LatestEarliestRecIntervalDate(
+                candidateEarliestDate, currentTargetDose.PreferableIntervals,
+                rule => resolveIntervalReference(rule.ReferenceType, rule.ReferenceTargetDoseNumber, rule.ReferenceVaccineCvxCodes)),
+            latestRecAgeDate: applicableAge?.LatestRecAgeDate(patient.DateOfBirth),
+            latestLatestRecIntervalDate: ForecastIntervalDates.LatestLatestRecIntervalDate(
+                candidateEarliestDate, currentTargetDose.PreferableIntervals,
+                rule => resolveIntervalReference(rule.ReferenceType, rule.ReferenceTargetDoseNumber, rule.ReferenceVaccineCvxCodes)),
+            maxAgeDate: currentTargetDose.AgeRules.Count > 0 ? maxAgeDate : null);
+    }
+}

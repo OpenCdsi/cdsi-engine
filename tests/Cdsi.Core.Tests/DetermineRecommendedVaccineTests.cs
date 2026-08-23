@@ -118,4 +118,69 @@ public class DetermineRecommendedVaccineTests
 
         Assert.False(result);
     }
+
+    [Fact]
+    public void IsPlausible_ForecastVaccineTypeFlagN_StillPlausible_UnlikeIsRecommended()
+    {
+        // The exact case that motivated adding this function: real doses with zero
+        // forecastVaccineType='Y' entries (~68% of the real dataset) still have clinically
+        // valid, age-appropriate, non-contraindicated vaccines - IsRecommendedSeriesDoseVaccine
+        // correctly excludes them per FORECASTRECVAC-1, but IsPlausibleSeriesDoseVaccine should
+        // still surface them as a valid option.
+        //
+        // Dates must fall within DengueNotForecastEligible's real age window ([9, 17) years from
+        // dob) - a genuine mistake caught by dotnet test: an earlier draft reused 2024-01-01 from
+        // ForecastVaccineTypeFlagN_NeverRecommended_RegardlessOfEverythingElse below, whose whole
+        // point is that the flag check short-circuits BEFORE the age window is ever evaluated -
+        // so that test never actually verified those dates were in-window for a plausibility
+        // check where the age gate still applies. 2012-01-01 (age 12) genuinely is.
+        var dob = new DateOnly(2000, 1, 1);
+
+        var recommended = DetermineRecommendedVaccine.IsRecommendedSeriesDoseVaccine(
+            DengueNotForecastEligible, isVaccineTypeContraindicated: false, dob,
+            earliestDate: new DateOnly(2012, 1, 1), adjustedRecommendedDate: new DateOnly(2012, 1, 1));
+        var plausible = DetermineRecommendedVaccine.IsPlausibleSeriesDoseVaccine(
+            DengueNotForecastEligible, isVaccineTypeContraindicated: false, dob,
+            earliestDate: new DateOnly(2012, 1, 1), adjustedRecommendedDate: new DateOnly(2012, 1, 1));
+
+        Assert.False(recommended);
+        Assert.True(plausible);
+    }
+
+    [Fact]
+    public void IsPlausible_Contraindicated_StillExcluded()
+    {
+        var dob = new DateOnly(2000, 1, 1);
+        var result = DetermineRecommendedVaccine.IsPlausibleSeriesDoseVaccine(
+            HepBUnbounded, isVaccineTypeContraindicated: true, dob,
+            earliestDate: new DateOnly(2024, 1, 1), adjustedRecommendedDate: new DateOnly(2024, 1, 1));
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void IsPlausible_OutsideAgeWindow_StillExcluded()
+    {
+        var dob = new DateOnly(2000, 1, 1);
+        // Both dates before MenBAgeGated's window opens (2010-01-01) - same age logic applies
+        // regardless of the forecastVaccineType flag.
+        var result = DetermineRecommendedVaccine.IsPlausibleSeriesDoseVaccine(
+            MenBAgeGated, isVaccineTypeContraindicated: false, dob,
+            earliestDate: new DateOnly(2005, 1, 1), adjustedRecommendedDate: new DateOnly(2008, 1, 1));
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void IsPlausible_FlagYVaccine_AlsoPlausible_ConsistentWithIsRecommended()
+    {
+        // A flag='Y' vaccine that IS recommended should also be plausible - the two functions
+        // shouldn't disagree in this direction, only in the "flag=N but otherwise valid" direction.
+        var dob = new DateOnly(2000, 1, 1);
+        var result = DetermineRecommendedVaccine.IsPlausibleSeriesDoseVaccine(
+            HepBUnbounded, isVaccineTypeContraindicated: false, dob,
+            earliestDate: new DateOnly(2024, 1, 1), adjustedRecommendedDate: new DateOnly(2024, 6, 1));
+
+        Assert.True(result);
+    }
 }

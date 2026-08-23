@@ -175,6 +175,18 @@ public sealed class PreferableIntervalRule : ITemporallyVersioned
     public DurationExpression? EarliestRecInt { get; init; }
     public DurationExpression? LatestRecInt { get; init; }
 
+    /// <summary>
+    /// §9.3 FORECASTPRIORITY-1's "interval priority flag." TERMINOLOGY MISMATCH worth knowing:
+    /// the spec text describes this as a flag "of 'Y'", but real data never uses "Y" at all -
+    /// swept all 490 real interval rules across all 30 files and found only two values: absent
+    /// (460) or the literal string "override" (30). IsPriorityOverride treats "override" as the
+    /// real-world equivalent of the spec's described "Y" state, since it's the only non-empty
+    /// value that ever appears - an inference grounded in the data, not a quoted definition.
+    /// </summary>
+    public string? IntervalPriority { get; init; }
+
+    public bool IsPriorityOverride => IntervalPriority == "override";
+
     /// <summary>Requires a resolved reference date, same as MinInt/AbsMinInt - see EvaluatePreferableInterval's reference-date resolution.</summary>
     public DateOnly? EarliestRecIntDate(DateOnly referenceDate) => EarliestRecInt?.AddTo(referenceDate);
     public DateOnly? LatestRecIntDate(DateOnly referenceDate) => LatestRecInt?.AddTo(referenceDate);

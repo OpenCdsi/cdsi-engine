@@ -337,7 +337,8 @@ public static class AntigenSupportingDataLoader
             AbsMinInt = el.ParseDurationOrNull("absMinInt"),
             MinInt = el.ParseDurationOrNull("minInt"),
             EarliestRecInt = el.ParseDurationOrNull("earliestRecInt"),
-            LatestRecInt = el.ParseDurationOrNull("latestRecInt")
+            LatestRecInt = el.ParseDurationOrNull("latestRecInt"),
+            IntervalPriority = el.ElementTextOrNull("intervalPriority")
         };
     }
 
