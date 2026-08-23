@@ -28,6 +28,12 @@ public sealed class AntigenSeries
     /// <summary>§7.5 FORECASTGUIDANCE-1. Free-text administrative guidance for the series regimen itself (e.g. "Anyone age 60 years or older who does not meet risk-based recommendations may still receive Hepatitis B vaccination."). Only non-empty entries kept - real data has 250 total, 211 non-empty.</summary>
     public required IReadOnlyList<string> SeriesAdminGuidance { get; init; }
 
+    /// <summary>§8.1+ Chapter 8 concepts, from §5.1's &lt;selectSeries&gt; element.</summary>
+    public required SeriesGroupInfo SeriesGroupInfo { get; init; }
+
+    /// <summary>The OTHER series group ID whose completion can substitute for this series' own group (e.g. HepB's "Standard" group (1) and "Increased Risk" group (2) reference each other). Null if this series has no equivalent group. 54/143 real series have this populated.</summary>
+    public string? EquivalentSeriesGroup { get; init; }
+
     public bool AppliesToGender(Gender patientGender) =>
         RequiredGenders.Count == 0 || RequiredGenders.Contains(patientGender);
 }

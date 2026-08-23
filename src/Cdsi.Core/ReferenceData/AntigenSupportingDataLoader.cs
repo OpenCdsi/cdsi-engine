@@ -149,9 +149,24 @@ public static class AntigenSupportingDataLoader
             SeriesAdminGuidance = seriesEl.Elements("seriesAdminGuidance")
                 .Select(e => e.Value)
                 .Where(text => !string.IsNullOrWhiteSpace(text))
-                .ToArray()
+                .ToArray(),
+            SeriesGroupInfo = ParseSeriesGroupInfo(
+                seriesEl.Element("selectSeries") ?? throw new InvalidOperationException($"Series '{seriesName}' in '{sourcePath}' has no selectSeries.")),
+            EquivalentSeriesGroup = seriesEl.ElementTextOrNull("equivalentSeriesGroups")
         };
     }
+
+    private static SeriesGroupInfo ParseSeriesGroupInfo(XElement el) => new()
+    {
+        IsDefaultSeries = string.Equals(el.ElementTextOrNull("defaultSeries"), "Yes", StringComparison.OrdinalIgnoreCase),
+        IsProductPath = string.Equals(el.ElementTextOrNull("productPath"), "Yes", StringComparison.OrdinalIgnoreCase),
+        SeriesGroupName = el.ElementTextOrNull("seriesGroupName") ?? throw new InvalidOperationException("selectSeries missing seriesGroupName."),
+        SeriesGroup = el.ElementTextOrNull("seriesGroup") ?? throw new InvalidOperationException("selectSeries missing seriesGroup."),
+        SeriesPriority = el.ElementTextOrNull("seriesPriority") ?? throw new InvalidOperationException("selectSeries missing seriesPriority."),
+        SeriesPreference = el.ElementTextOrNull("seriesPreference") is string prefText ? int.Parse(prefText) : null,
+        MinAgeToStart = el.ParseDurationOrNull("minAgeToStart"),
+        MaxAgeToStart = el.ParseDurationOrNull("maxAgeToStart")
+    };
 
     private static Indication ParseIndication(XElement el)
     {

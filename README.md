@@ -21,7 +21,7 @@ Relevant Patient Series modules. Chapter 6 onward has not been written yet; see 
 | Evaluate Vaccine Dose Administered | §6.1–6.10 | ✅ All 10 logical components implemented + tested |
 | Evaluate Immunization History (§4.4 orchestrator) | §4.4 | ✅ Implemented + tested — the two-pointer target-dose/administered-dose walk, wiring all 10 Ch.6 components together with real (not caller-supplied) Interval and Vaccine Conflict resolution. Now runs across every relevant series for a patient (`EvaluatePatientSeriesHistory`), with real cross-antigen Vaccine Conflict resolution proven end-to-end. See "The orchestrator" below for what's still deferred (Recurring Dose, Completed Series) |
 | Forecast | §7 | ✅ Complete — all of §7.1-§7.6 implemented + tested (§7.1 Conditional Skip Forecast context, §7.2 Evidence of Immunity, §7.3 Contraindications, §7.4 Forecast Need, §7.5 Generate Forecast Dates incl. recommended vaccine/admin guidance/dose number, §7.6 Validate Recommendation) |
-| Select Best Patient Series | §8 | ⏳ Not started |
+| Select Best Patient Series | §8 | ✅ Complete — all of §8.1-8.8 implemented + tested (Pre-Filter, Identify One Prioritized, Classify Scorable, all three point-scoring tables, Select Prioritized, Determine Best) |
 | Vaccine Group Merge | §9 | ⏳ Not started |
 
 ## The orchestrator (§4.4) — what it unlocked, and what's still deferred
@@ -209,7 +209,13 @@ src/Cdsi.Core/
                      ForecastIntervalDates (§7.5, core date calc), DetermineRecommendedVaccine
                      (§7.5, FORECASTRECVAC-1), DetermineForecastDoseNumber (§7.5,
                      FORECASTDN-1), GenerateForecastGuidance (§7.5, FORECASTGUIDANCE-1),
-                     ValidateRecommendation (§7.6).
+                     ValidateRecommendation (§7.6). Chapter 8: PreFilterPatientSeries (§8.1),
+                     IdentifyOnePrioritizedPatientSeries (§8.2),
+                     ClassifyScorablePatientSeries (SELECTB-6/16/21 + §8.3 Table 8-5),
+                     ScoreCompletePatientSeries (§8.4), ForecastFinishDate (§8.5, SELECTB-12),
+                     ScoreInProcessPatientSeries (§8.5, Table 8-9),
+                     ScoreNoValidDosesPatientSeries (§8.6, Table 8-11),
+                     SelectPrioritizedPatientSeries (§8.7), DetermineBestPatientSeries (§8.8).
                      DoseEvaluationOutcome (shared result type for §6.4-6.9),
                      EvaluateDoseAdministeredCondition (§6.1), EvaluateConditionalSkip
                      (§6.2/§7.1, context-aware), EvaluateInadvertentVaccine (§6.3),
@@ -464,6 +470,182 @@ context tests, since it's the same underlying mechanism exercised from a differe
 against real CDC data, closing out the entire Forecast chapter alongside Chapter 6's full
 evaluation pipeline.
 
+## §8.1/§8.2: starting Chapter 8
+
+Chapter 8 introduces a genuinely new foundational concept — **Series Group** — from §5.1's
+`<selectSeries>` element, which was never parsed when `CreateRelevantPatientSeries` was
+originally built (nothing needed it then). Real HepB data alone has 18 series split across 2
+series groups ("Standard" and "Increased Risk," cross-referencing each other via
+`equivalentSeriesGroups`), with per-series `seriesPriority` ("A"/"B"/"C"), `seriesPreference`
+(a tie-break rank), and `defaultSeries`/`productPath` flags — none of it previously modeled.
+
+**A real bug caught by the sweep, not by a failed test run**: my first `SeriesGroupInfo` draft
+made `seriesPreference` required, since a quick manual check of a few series suggested it was
+always populated. The full 30-file sweep (a habit that's paid off repeatedly in this project)
+found 12 real series — several "Shared Clinical Decision Making" series among them — where it's
+genuinely absent. Fixed before writing a single line of evaluation logic against it, not after
+a crash.
+
+Scoped this round to §8.1 (Pre-Filter) and §8.2 (Identify One Prioritized Patient Series) — the
+two pieces that don't need the full scoring machinery (§8.3-8.7), which introduces further new
+concepts (`forecast finish date`, `product path`, `completable`) worth their own grounding pass
+rather than rushing. §8.2 is a genuine shortcut: many series groups resolve to an obvious single
+winner (one scorable series, or a clean complete/in-process/default pick) without ever needing
+the point-scoring system in §8.4-8.6.
+
+One inference worth flagging: SELECTSCORE-2's Bullet 2 ("earliest valid dose before the maximum
+age to start date") doesn't say what happens when there's no `maxAgeToStart` at all — treated
+as unbounded/always-satisfied here, consistent with how an absent age ceiling is handled
+elsewhere in this codebase, but not literally spec-stated for this specific rule.
+
+Real data made a genuinely good test fixture here: HepB's "Increased Risk" group has 8 Risk-type
+series with an actual priority split (6 at "B", 2 at "A" — Dialysis and Recombivax), which
+directly exercises Bullet 1's "highest priority in the group" logic without needing synthetic
+data.
+
+## §8.3/§8.4: classification and the first scoring table
+
+§8.3's `DetermineScoringCategory` folded naturally into the same file as §8.2's SELECTB-6/16/21
+helpers, since Table 8-5 is literally titled after this section and reuses those same
+definitions directly. One structural fact worth remembering when reading Table 8-5: by the time
+a series group reaches §8.3 at all, §8.2 has already ruled out a complete or in-process count of
+exactly 1 — either would have won outright as the single prioritized series without needing to
+score anything. That's what makes Table 8-5's three columns collectively cover the cases that
+actually arrive here, even though the table itself doesn't state that reasoning explicitly.
+
+One combination Table 8-5 doesn't name an outcome for, flagged rather than guessed at: zero
+complete, zero (or one) in-process, but not every scorable series has zero valid doses either
+(e.g. a series with 1+ satisfied dose whose forecast status is something other than
+Complete/NotComplete, like Contraindicated). `DetermineScoringCategory` returns `Undetermined`
+for this case rather than silently picking one of the three named categories.
+
+§8.4 turned out to be the simplest point-scoring table in the chapter — a single condition
+("has the most valid doses"), worth exactly +1 if this series uniquely has the max, 0 if tied,
+-1 otherwise. `ScoreCompletePatientSeries.Execute` is a genuinely small, pure function as a
+result. §8.5 (In-Process) and §8.6 (No Valid Doses) are considerably larger — 5 and 3 conditions
+respectively, introducing `forecast finish date` (SELECTB-12, itself a calculation combining a
+forecast's earliest date with the latest minimum interval across remaining target doses),
+`completable` (SELECTB-3), `closest to completion` (SELECTB-5), and `product patient series`
+(SELECTB-23, already trivial via `SeriesGroupInfo.IsProductPath`) — each worth its own grounding
+pass rather than rushing through both in the same round §8.4 was built in.
+
+## §8.5 In-Process Patient Series scoring
+
+The biggest single scoring piece — five conditions instead of §8.4's one, and two of them
+(`SELECTB-12`'s forecast finish date, `SELECTB-3`'s completable check) needed real calculation
+rather than just a lookup.
+
+**`SELECTB-12` (forecast finish date)** turns out to have a subtle implementation problem worth
+knowing about: "the latest minimum interval from the remaining target dose(s)" can't be computed
+by comparing `DurationExpression` values directly — "4 weeks" vs. "1 month" only has a
+well-defined answer once anchored to a real date, since a month's length varies. Solved by
+applying each remaining dose's `MinInt` duration to the *same* `earliestDate` anchor and taking
+whichever resulting date is latest, which is mathematically equivalent without ever needing to
+compare two durations in the abstract. One known simplification flagged in code: this doesn't
+run `TemporalRuleSelector`'s version-selection over each dose's interval rules first, so a dose
+with multiple temporally-versioned intervals (the COVID-19-style case elsewhere in this dataset)
+could let a superseded rule's duration win the MAX if it's longer than the current one. Not
+exercised by any real fixture in this project's tests yet, but a real gap if this function is
+ever pointed at one.
+
+**A genuine spec-text inconsistency, reconciled rather than inherited**: `SELECTB-5` ("closest
+to completion") is worded as a strict "less than" comparison against every other series, which
+under a literal reading can never be true for two tied series at once — yet Table 8-9 itself has
+an explicit "true for two or more scorable patient series → 0" column for this exact condition.
+`ScoreInProcessPatientSeries` doesn't inherit that gap: it separately detects a tie for the
+group's minimum not-satisfied-dose-count and scores it 0, matching the table's own three-way
+shape rather than the stricter literal wording of the underlying rule text. Locked in with a
+test (`ClosestToCompletion_TiedMinimum_ScoresZeroForBoth_DespiteSelectB5sStrictWording`) named
+specifically to make that reconciliation obvious to a future reader, not just correct by
+accident. `SELECTB-11` ("can finish earliest") doesn't have this problem — its own wording
+already uses "on or before," so ties there behave straightforwardly.
+
+Every test in this round traces its expected point total by hand against the five conditions
+before being written, given how easy it'd be for a sign error in one condition to hide behind
+four others cancelling out correctly.
+
+## §8.6 No Valid Doses scoring
+
+Smaller than §8.5 (3 conditions instead of 5), but with two things worth knowing about:
+
+**A deliberate sign inversion, confirmed against the literal table text rather than assumed
+from §8.5's pattern**: §8.5 rewards staying on a product-specific path once you've already
+committed doses to it (+2). §8.6 *penalizes* being product-tied when scoring series with zero
+doses given yet (-1 if product, +1 if not). This makes sense once you notice the context split —
+a product-specific path carries supply/availability risk that matters more when nothing has
+started yet than when you're already partway through it — but it would be an easy "obviously a
+copy-paste bug" fix for someone skimming the code without checking the spec. Flagged explicitly
+in the doc comment so nobody "corrects" it.
+
+**"Start date" (needed by `SELECTB-14`) is never actually defined anywhere in the spec** — it
+appears in exactly one sentence and nowhere else, checked broadly. Since this scoring path only
+applies to series with zero valid doses (nothing given yet), the most defensible reading is
+`SeriesGroupInfo.MinAgeToStartDate` — reference data that already exists for exactly this
+purpose, and whose nullability matches `SELECTB-14`'s own "with a start date" phrasing (implying
+some series won't have one). Flagged as an inference, not a quoted definition.
+
+Also hit the same tie-vs-strict-comparison issue as §8.5's `SELECTB-5`: `SELECTB-14` is worded
+as a strict "before" that can't be true for two tied series, while Table 8-11 has an explicit
+tied→0 column. Reconciled the same way — detect the tie separately rather than inherit the gap.
+
+**Caught my own mistake before shipping**: while building a real-data test using HepB's series
+group "2" (Dialysis and Recombivax both share `minAgeToStart` "20 years," genuinely earlier than
+the other six series at "60 years"), I initially assumed Dialysis and Recombivax would score
+identically since they tie on the start-date condition. A quick real-data check before finalizing
+the test showed Recombivax is `productPath: "Yes"` while Dialysis is `"No"` — they don't score
+the same at all, because of the very sign-inversion this round introduced. Fixed by comparing
+Dialysis against a different, `productPath`-matched series instead, which cleanly isolates the
+one condition the test was actually meant to demonstrate.
+
+## §8.7 Select Prioritized Patient Series
+
+The smallest step in the whole scoring pipeline. `SELECTBEST-1` ("the score is the sum of all
+points awarded") turned out to need no code at all — `ScoreCompletePatientSeries`/
+`ScoreInProcessPatientSeries`/`ScoreNoValidDosesPatientSeries` already return the fully-summed
+total for whichever table applied, so there's nothing left to sum by the time a series reaches
+this step. `SELECTBEST-2` (pick the highest score, tie-break by best `seriesPreference`) is the
+only real logic here, and it's genuinely simple: max, then a secondary min on preference among
+whoever's tied.
+
+Tested against HepB's real, distinct 1-through-10 preference ordering in series group "1" —
+including a case that deliberately lists the worse-preference series *first* in the input list,
+to confirm the tie-break is a real comparison and not just "whichever came first." Also tests
+what happens when a tie survives even the preference tie-break (two series artificially given
+the same score and the same preference number, which can't happen within one real series group
+but isn't something the function should assume away) — resolves to "no single winner" rather
+than picking arbitrarily, consistent with every other "no resolution defined" case elsewhere in
+this project.
+
+## §8.8 Determine Best Patient Series — Chapter 8 complete
+
+The genuine finale, and structurally different from everything else in the chapter: §8.1-8.7
+all operate *within* one series group; §8.8 is the only step that reaches *across* groups, via
+`equivalentSeriesGroups`. It runs once per series group's own prioritized series (§8.7's output),
+after every group for an antigen has already picked one — which is why `DetermineBestPatientSeries`
+is deliberately a pure function over pre-resolved cross-group facts (is *this* series complete,
+does an *equivalent* group have a complete or Risk-type prioritized series) rather than something
+that walks a patient's full set of groups itself. That walk — compute every group's prioritized
+series first, then cross-reference each one's equivalent group — is real orchestration work of
+its own, left for whenever this gets wired into an end-to-end flow, same pattern as
+`EvaluateDoseAgainstTargetDose` existing well before `EvaluateSeriesHistory` tied multiple
+evaluations together.
+
+The chapter's own framing is worth remembering when using this: "one or more non-redundant best
+patient series will remain" — a Standard-group series and a Risk-group series can both end up
+"best" simultaneously for the same antigen, because Table 8-14's Column 2 explicitly lets an
+incomplete Risk series stand as best when nothing better covers it, rather than requiring every
+best series to be complete. Tested against real HepB `SeriesType` data (group "1" is entirely
+Standard, group "2" is entirely Risk, and HepA's real Evaluation Only fixture from §8.1 covers
+the "never best" case for that series type), plus a case confirming that completion alone wins
+regardless of how contradictory the other three inputs are — Column 1 has no dependency on them
+at all, and the test deliberately feeds in values that would fail every other column to prove it.
+
+**Chapter 8 is now complete.** All eight sub-steps, §8.1 through §8.8, are implemented and
+tested against real CDC data — Pre-Filter, Identify One Prioritized, Classify Scorable, all
+three point-scoring tables (Complete/In-Process/No Valid Doses), Select Prioritized, and
+Determine Best. Alongside the completed Chapters 6 and 7, that's evaluation, forecasting, and
+now series selection all built and proven.
+
 ## Next steps
 
 1. All 10 Chapter 6 logical components — ✅ done.
@@ -478,9 +660,17 @@ evaluation pipeline.
    `latestInadvertentAdministrationDate`/`mostRecentAdministeredDate` from the orchestrator's
    tracked history instead of taking them as caller-supplied parameters — a real but small
    follow-up, not a new problem.
-5. §8 Select Best Patient Series — genuinely comes AFTER §7 (see "Correction" above, now fully
-   applicable since §7 is done). Needed to resolve §6.2's Completed Series condition and to
-   pick a "best" series per series group once forecasts exist for all of them. Natural next
-   chapter to start.
-6. §9 Vaccine Group Merge.
-7. `Cdsi.Api` (ASP.NET) + real Dockerfile target once the pipeline is complete.
+5. **Chapter 8 Select Best Patient Series (§8.1-§8.8) — ✅ complete.** All eight sub-steps
+   implemented and tested against real CDC data: Pre-Filter, Identify One Prioritized, Classify
+   Scorable, all three point-scoring tables (Complete/In-Process/No Valid Doses), Select
+   Prioritized, and Determine Best — including the foundational Series Group data model
+   (`selectSeries`) that nothing before this chapter needed.
+6. A genuine orchestration piece is still open, deliberately deferred throughout Chapter 8: a
+   per-antigen walk that (a) computes every series group's prioritized series via §8.1-8.7,
+   then (b) cross-references each group's `equivalentSeriesGroups` to run §8.8 and produce the
+   final "one or more best patient series" set. Every §8.x function is pure and already tested
+   in isolation; this is the wiring step, same shape as `EvaluateSeriesHistory` was for Chapter
+   6's ten components.
+7. §9 Vaccine Group Merge — the next chapter, and the last piece of core CDSi logic (§4-§9)
+   before this becomes an API.
+8. `Cdsi.Api` (ASP.NET) + real Dockerfile target once the pipeline is complete.
