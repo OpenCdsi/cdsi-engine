@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Cdsi.Api.Tests</RootNamespace>
+    <LangVersion>12</LangVersion>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- 8.0.11: matches the runtime major.minor (net8.0) exactly, same reasoning as pinning Swashbuckle to a version confirmed for .NET 8 - see README. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Cdsi.Api\Cdsi.Api.csproj" />
+  </ItemGroup>
+
+  <!-- No data-copying setup needed here, unlike Cdsi.Core.Tests: Program.cs's own
+       FindDataDirectory walks up from the test assembly's own bin/ output directory (through
+       tests/Cdsi.Api.Tests/, tests/) until it finds Cdsi.sln at the real repo root, then
+       resolves data/ from there - the exact same mechanism already proven working for
+       Cdsi.Demo's own `dotnet run`. Nothing extra to copy or configure. -->
+
+</Project>

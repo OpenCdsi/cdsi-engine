@@ -1,0 +1,27 @@
+# Builds and runs the CDSi Immunization Engine API. `docker compose up --build` from the repo
+# root builds the image from the root Dockerfile and starts the API on http://localhost:8080.
+#
+# The real data/ directory is mounted read-only into the container rather than baked into the
+# image (see README's "top priority is easy updates" note and the Dockerfile's own comment on
+# CDSI_DATA_PATH) - updating the CDC's supporting data is a matter of replacing files under
+# ./data and restarting the container, not rebuilding the image.
+services:
+  cdsi-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data:ro
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      - CDSI_DATA_PATH=/data
+      - ASPNETCORE_ENVIRONMENT=Production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped

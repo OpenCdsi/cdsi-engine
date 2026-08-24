@@ -271,9 +271,21 @@ src/Cdsi.Demo/
                      ReferenceDataRepository and runs a few sample patients through
                      GeneratePatientForecast end to end, printing real forecast output.
                      `dotnet run --project src/Cdsi.Demo` from the repo root.
+src/Cdsi.Api/
+                     Minimal-API ASP.NET Core 8 web service wrapping GeneratePatientForecast.
+                     Contracts/ holds the request/response DTOs and their mapping to/from
+                     Cdsi.Core's domain models. `dotnet run --project src/Cdsi.Api`, or
+                     `docker compose up --build` from the repo root — see "Cdsi.Api — the
+                     dockerized web API" below.
+tests/Cdsi.Api.Tests/
+                     Real HTTP integration tests via WebApplicationFactory<Program> - the
+                     actual Program.cs startup running in-memory against the real data/
+                     directory, not mocked.
 data/
   antigens/          All 30 CDC AntigenSupportingData-*.xml files + XSD
   schedule/          ScheduleSupportingData.xml + XSD (CVX-to-antigen map, vaccine conflicts)
+Dockerfile           Multi-stage build for Cdsi.Api - see "Cdsi.Api — the dockerized web API"
+docker-compose.yml   Builds and runs the API locally with the data/ volume mounted
 ```
 
 ## Build & test
@@ -1285,6 +1297,123 @@ inadvertent-administration dates, multi-antigen priority-forecast wiring, runnin
 antigen catalog through the pipeline for real), and then `Cdsi.Api` — turning this into an
 actual running service.
 
+## `Cdsi.Api` — the dockerized web API
+
+The pipeline is now reachable over HTTP, not just from C# callers. `Cdsi.Api` is a minimal-API
+ASP.NET Core 8 project wrapping `GeneratePatientForecast` behind two endpoints, containerized
+with a real multi-stage Dockerfile and a `docker-compose.yml` for local builds and runs.
+
+### Running it
+
+```bash
+docker compose up --build
+```
+
+This builds the image from the root `Dockerfile` and starts the API on `http://localhost:8080`.
+
+Without Docker, `dotnet run --project src/Cdsi.Api` works too - the same `FindDataDirectory`
+pattern already proven in `Cdsi.Demo` walks up from the executable's location to find `Cdsi.sln`
+and resolves `data/` from there, so no environment variable is needed for local development.
+
+### Swagger, gated to non-Production
+
+`GET /swagger` (interactive UI) and `GET /swagger/v1/swagger.json` (raw spec) are only exposed
+when `ASPNETCORE_ENVIRONMENT` isn't `Production` - `app.Environment.IsDevelopment()` gates the
+`UseSwagger()`/`UseSwaggerUI()` middleware. This is a clinical data API; leaving interactive docs
+always reachable would mean anyone who can hit the port can browse the full API surface and fire
+test requests at it. `docker-compose.yml` explicitly sets `ASPNETCORE_ENVIRONMENT=Production`,
+so the containerized API correctly never exposes Swagger.
+
+For local `dotnet run` to default to `Development` (and therefore have Swagger available) without
+needing an environment variable set by hand, `Properties/launchSettings.json` was added - a file
+every scaffolded ASP.NET Core project gets from `dotnet new webapi` that this project didn't have,
+since it was hand-built rather than scaffolded. Without it, local `dotnet run` would have silently
+defaulted to `Production` too (ASP.NET Core's own actual default when no environment is set at
+all), disabling Swagger locally as well - caught and fixed as part of the same change, not left
+as a follow-up gap.
+
+### Endpoints
+
+- `GET /health` - liveness/readiness check, also reports how much reference data loaded
+  (antigen/series/vaccine-group counts) - useful for confirming the data volume mount actually
+  worked, not just that the process is up.
+- `POST /api/v1/forecast` - the real thing. Request body maps directly to `Patient`/
+  `VaccineDoseAdministered` (see `Contracts/ForecastRequestDto.cs`); response is one entry per
+  vaccine group forecast (see `Contracts/ForecastResponseDto.cs`), with enums represented as
+  their string names (`"NotComplete"`, `"SingleAntigen"`, etc.) rather than numbers, for a JSON
+  API a real EHR integration will actually read by hand while debugging.
+
+### The data volume, not baked into the image
+
+Consistent with this project's stated top priority ("easy updates when CDC schedule/logic
+changes"): `data/` is mounted read-only into the container (`./data:/data:ro` in
+`docker-compose.yml`) rather than `COPY`'d into the image. Updating the CDC's supporting data is
+a matter of replacing files under `./data` and restarting the container - not rebuilding the
+image. `ReferenceDataRepository` is loaded once at startup as a singleton and resolved eagerly
+(not lazily on first request), so a bad data path fails fast with a clear startup error instead
+of surfacing as a confusing 500 on an EHR integration's first real request.
+
+### Package versions, chosen deliberately rather than left to "latest"
+
+This sandbox still can't reach nuget.org (not in the allowed-domains list) or execute `dotnet
+build`, so every new package reference here was verified against real, current NuGet listings via
+web search *before* being written into a `.csproj`, not guessed:
+
+- **`Swashbuckle.AspNetCore` 6.6.2** - specifically confirmed (via a dedicated blog post found
+  during that search) as the release that added native .NET 8 support, rather than picking
+  whatever the newest major version happened to be (10.2.3 at the time of writing, which
+  introduces its own breaking changes around `Microsoft.OpenApi` 2.x). A deliberately
+  conservative, confirmed-compatible choice over the newest one.
+- **`Microsoft.AspNetCore.Mvc.Testing` 8.0.11** - matches the runtime major.minor (`net8.0`)
+  exactly, the standard alignment convention for first-party ASP.NET Core packages, confirmed to
+  exist as a real published version rather than assumed.
+
+### Tests
+
+`Cdsi.Api.Tests` uses `WebApplicationFactory<Program>` - real HTTP calls against the real
+`Program.cs` startup running in-memory, including real data loading from the real repo `data/`
+directory. Not mocked at any layer. Covers the health check's real loaded-data counts, two real
+HepB scenarios reused deliberately from elsewhere in this project (with an honest correction
+made along the way - see below), invalid input (bad gender string, missing required field), and
+the assessment-date default-to-today behavior.
+
+**A mistake caught and fixed before shipping, not after**: an early draft of the two-dose HepB
+test reused `GeneratePatientSeriesForecastTests`' own "`ForecastDoseNumber` should be 3" fixture
+directly. But that fixture was built against a *deliberately scoped-down* single-series test
+double - this request goes through the real, full, unscoped 18-series catalog, the same one
+`HepBFullCatalogCompetitionTests` already established has three genuine competing candidates for
+this exact dose history, two of which resolve to dose 3 and one to dose 2, without a confidently
+knowable winner among them. Asserting exactly `3` here would have been an unverified guess
+dressed up as a checked fact. Fixed to assert what's actually known: an in-process forecast
+exists, for dose 2 or 3 - real coverage of the HTTP/JSON round-trip without overclaiming
+precision this sandbox can't verify.
+
+**A real compile error, caught on the first actual `dotnet test` run and fixed immediately**:
+`.WithOpenApi()` was called on both minimal API endpoints, but that extension method belongs to
+the separate `Microsoft.AspNetCore.OpenApi` package (Microsoft's own OpenAPI metadata generator,
+`.NET 9`'s default), not Swashbuckle - a genuine conflation of two different OpenAPI mechanisms
+that this sandbox's inability to run `dotnet build` couldn't catch in advance. `AddSwaggerGen()`
++ `AddEndpointsApiExplorer()` (the combination actually used here) discovers and documents
+minimal API endpoints on its own; `.WithOpenApi()` isn't needed at all with that combination.
+Fixed by removing both calls - `.WithName()` stays, since that's a core minimal-API method
+unrelated to either OpenAPI package.
+
+**A real runtime bug, caught by the first real integration test run against the actual HTTP
+pipeline** - the kind this project's static analysis (brace checks, hand-tracing against real
+data, source-code re-reads) genuinely cannot catch, since it only manifests when the framework's
+own request pipeline runs. `Forecast_MissingRequiredDateOfBirth_Returns400` sent a request body
+missing the required `dateOfBirth` field expecting a 400 - and got a 500 instead. The real cause,
+visible directly in the test run's own logged exception: ASP.NET Core's minimal-API JSON binding
+throws `BadHttpRequestException` for exactly this case (a missing required property), and that
+exception type carries the correct status code (400) as its own `StatusCode` property - but the
+custom `UseExceptionHandler` handler only special-cased `InvalidRequestException`, silently
+discarding the framework's own correct status and falling through to the generic 500 branch for
+everything else. Fixed by adding a branch that respects `BadHttpRequestException.StatusCode`
+directly, and prefers the inner `JsonException`'s more specific message ("was missing required
+properties, including the following: dateOfBirth") over the outer exception's more generic one
+when available - both details visible directly in the failing test's own captured log output,
+not guessed at.
+
 ## Next steps
 
 **The end-to-end pipeline is complete and has been run successfully against the real, full
@@ -1299,11 +1428,24 @@ administered doses in, merged vaccine group forecasts out.
 own story. Every deliberately-deferred piece of this project's core CDSi logic has been
 resolved, grounded in real data before implementation.
 
+**`Cdsi.Api` is confirmed working end-to-end, including the real Docker build.** `dotnet test`
+passes 327/327 (321 core + 6 API integration tests, real HTTP calls, real data loading, no
+mocks), and `docker compose up --build` has been run for real: the multi-stage build completes,
+the container starts, and the real data volume mount loads correctly (143 series across 30
+antigens, 26 vaccine groups - the exact same counts every other real run of this project has
+shown). One informational-only warning appeared and needs no action: the base image's own
+default `ASPNETCORE_HTTP_PORTS` gets overridden by this project's explicit `ASPNETCORE_URLS`
+setting, which is the intended behavior working as designed, not a problem.
+
 What remains, roughly in order of what's most valuable next:
 
-1. **The full 18-series HepB competition test is now built** (`HepBFullCatalogCompetitionTests`)
-   — see "The full 18-series HepB competition" below for the full story, including an honest
-   account of what's asserted with full confidence versus what genuinely needs a real `dotnet`
-   run to verify further.
-2. `Cdsi.Api` (ASP.NET) + a real Dockerfile target — turning `GeneratePatientForecast` into an
-   actual running service, the last major phase of this project.
+1. **Azure Functions as a second API surface, wrapping the same `GeneratePatientForecast` call**
+   - explicitly requested as the next phase after the dockerized API. Likely an isolated-worker
+     Azure Functions project (`Cdsi.Functions`) sharing `Cdsi.Core` and possibly `Cdsi.Api`'s own
+     `Contracts` DTOs/mapping layer, rather than duplicating the request/response shapes.
+
+At this point, every piece of this project - the core engine (all four chapters, all four
+originally-documented gaps), the full 18-series HepB competition, MPL 2.0 licensing, and the
+dockerized API - has been confirmed against a real `dotnet test`/`docker compose up` run, not
+just reasoned about from this sandbox. Azure Functions is the one remaining piece still ahead of
+that verification.
