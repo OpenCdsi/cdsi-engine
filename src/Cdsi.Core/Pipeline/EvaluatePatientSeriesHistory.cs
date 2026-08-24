@@ -28,10 +28,15 @@ namespace Cdsi.Core.Pipeline;
 /// end-interval branch) can genuinely differ per series - picking one is a reasonable but real
 /// simplification, not a spec-mandated resolution.
 ///
-/// STILL DEFERRED: §6.2's "Completed Series" condition. Its seriesGroups value (real data: "1")
-/// turns out to reference §5.1's selectSeries/seriesGroup concept - Chapter 8 "Select Best
-/// Patient Series" territory that doesn't exist in this codebase at all yet. Resolving it
-/// properly needs that built first, not just this orchestrator.
+/// §6.2's "Completed Series" condition: `resolveCompletedSeries` takes the ANTIGEN alongside the
+/// condition's own `seriesGroups` value, because `seriesGroups` (real data: always "1" or "2")
+/// is only meaningful WITHIN one antigen's own file - the same string means something entirely
+/// different for a different antigen. This function builds the antigen-scoped closure each
+/// individual series' own evaluation actually needs (still a plain `Func&lt;string?, bool&gt;` by
+/// the time it reaches EvaluateSeriesHistory/EvaluateConditionalSkip, which don't need to know
+/// about antigen-scoping at all) - the caller is responsible for the resolver's actual logic,
+/// typically a two-pass approach (see GeneratePatientForecast) since a series in one group often
+/// needs to know about ANOTHER group's completion status within the same antigen.
 /// </summary>
 public static class EvaluatePatientSeriesHistory
 {
@@ -41,7 +46,7 @@ public static class EvaluatePatientSeriesHistory
         IReadOnlyList<VaccineDoseAdministered> allDosesAdministered,
         IReadOnlyDictionary<string, CvxMapEntry> cvxToAntigen,
         IReadOnlyDictionary<string, IReadOnlyList<VaccineConflictRule>> conflictsByImpactedCvx,
-        Func<string?, bool> resolveCompletedSeries)
+        Func<string, string?, bool> resolveCompletedSeries)
     {
         var antigenRecords = OrganizeImmunizationHistory.Execute(patient, allDosesAdministered, cvxToAntigen);
 
@@ -67,7 +72,7 @@ public static class EvaluatePatientSeriesHistory
 
             var seriesResult = EvaluateSeriesHistory.Execute(
                 patient, series, thisAntigenRecords, otherAntigensHistory,
-                conflictsByImpactedCvx, resolveCompletedSeries);
+                conflictsByImpactedCvx, groups => resolveCompletedSeries(series.Antigen, groups));
 
             results[series] = seriesResult;
 

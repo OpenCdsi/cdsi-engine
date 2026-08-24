@@ -49,9 +49,6 @@ public class GeneratePatientForecastTests
             ["HepB"] = AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"))
         };
 
-    private static readonly Func<string?, bool> NoCompletedSeriesExpected =
-        _ => throw new InvalidOperationException("Test fixture shouldn't reach a Completed Series condition.");
-
     private static Patient MakePatient(DateOnly dob) => new() { PatientId = "p1", DateOfBirth = dob };
 
     [Fact]
@@ -68,7 +65,7 @@ public class GeneratePatientForecastTests
         var results = GeneratePatientForecast.Execute(
             patient, doses, HepB3DoseSeriesOnly, Schedule, VaccineGroups,
             ImmunityByAntigen, ContraindicationsByAntigen,
-            assessmentDate: new DateOnly(2020, 9, 1), NoCompletedSeriesExpected);
+            assessmentDate: new DateOnly(2020, 9, 1));
 
         var hepB = Assert.Single(results);
         Assert.Equal("HepB", hepB.VaccineGroupName);
@@ -105,7 +102,7 @@ public class GeneratePatientForecastTests
         var results = GeneratePatientForecast.Execute(
             patient, doses, HepB3DoseSeriesOnly, Schedule, VaccineGroups,
             ImmunityByAntigen, ContraindicationsByAntigen,
-            assessmentDate: new DateOnly(2021, 1, 1), NoCompletedSeriesExpected);
+            assessmentDate: new DateOnly(2021, 1, 1));
 
         var hepB = Assert.Single(results);
         Assert.Equal(PatientSeriesStatus.Complete, hepB.Status);
@@ -123,7 +120,7 @@ public class GeneratePatientForecastTests
         var results = GeneratePatientForecast.Execute(
             patient, Array.Empty<VaccineDoseAdministered>(), HepB3DoseSeriesOnly, Schedule, VaccineGroups,
             ImmunityByAntigen, ContraindicationsByAntigen,
-            assessmentDate: new DateOnly(2024, 1, 1), NoCompletedSeriesExpected);
+            assessmentDate: new DateOnly(2024, 1, 1));
 
         var hepB = Assert.Single(results);
         Assert.Equal(PatientSeriesStatus.NotComplete, hepB.Status);

@@ -12,8 +12,19 @@ public class EvaluateConditionalSkipTests
     private static readonly IReadOnlyList<AntigenSeries> RabiesSeries =
         AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Rabies-508.xml"));
 
+    private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+
     private static readonly Func<string?, bool> NoCompletedSeriesExpected =
         _ => throw new InvalidOperationException("Test fixture shouldn't reach a Completed Series condition.");
+
+    // Real data: "HepB risk Dialysis 4-dose series" Dose 1 has exactly one conditionalSkip
+    // instance, context "Both", a single set with a single condition: Completed Series
+    // referencing series group "1" (the real "HepB 3-dose series" Standard group). A clean,
+    // single-condition fixture - real motivation for building the Completed Series resolver.
+    private static IReadOnlyList<ConditionalSkipInstance> HepBDialysisDose1 =>
+        HepBSeries.Single(s => s.SeriesName == "HepB risk Dialysis 4-dose series")
+            .SeriesDoses.Single(d => d.DoseNumber == 1).ConditionalSkipInstances;
 
     // Real data: "Hib start at 2 months 4-dose series" Dose 2 has TWO top-level conditionalSkip
     // instances - context Evaluation (beginAge "15 months - 4 days") and context Forecast
@@ -199,6 +210,32 @@ public class EvaluateConditionalSkipTests
         var canSkip = EvaluateConditionalSkip.CanBeSkipped(
             new DateOnly(2020, 1, 1), new DateOnly(2025, 1, 1), ConditionalSkipContext.Evaluation,
             Array.Empty<ConditionalSkipInstance>(), Array.Empty<PriorVaccineDoseAdministered>(), NoCompletedSeriesExpected);
+
+        Assert.False(canSkip);
+    }
+
+    [Fact]
+    public void RealHepBDialysisDose1_CompletedSeriesConditionMet_CanBeSkipped()
+    {
+        var dob = new DateOnly(2000, 1, 1);
+
+        var canSkip = EvaluateConditionalSkip.CanBeSkipped(
+            dob, new DateOnly(2024, 1, 1), ConditionalSkipContext.Evaluation,
+            HepBDialysisDose1, Array.Empty<PriorVaccineDoseAdministered>(),
+            resolveCompletedSeries: _ => true); // group "1" (Standard) is complete
+
+        Assert.True(canSkip);
+    }
+
+    [Fact]
+    public void RealHepBDialysisDose1_CompletedSeriesConditionNotMet_CannotBeSkipped()
+    {
+        var dob = new DateOnly(2000, 1, 1);
+
+        var canSkip = EvaluateConditionalSkip.CanBeSkipped(
+            dob, new DateOnly(2024, 1, 1), ConditionalSkipContext.Evaluation,
+            HepBDialysisDose1, Array.Empty<PriorVaccineDoseAdministered>(),
+            resolveCompletedSeries: _ => false); // group "1" (Standard) is NOT complete
 
         Assert.False(canSkip);
     }

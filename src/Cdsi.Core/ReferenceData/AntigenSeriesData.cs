@@ -77,6 +77,9 @@ public sealed class SeriesDose
 
     /// <summary>§7.4 Determine Forecast Need (Table 7-9/7-10). At most one per dose in real data (53 populated instances across all 30 files). Null if this dose has no seasonal restriction.</summary>
     public SeasonalRecommendation? SeasonalRecommendation { get; init; }
+
+    /// <summary>§4.4 step 5: "a dose that is to be repeated" (Td boosters, annual flu/COVID, occupational rabies exposure, etc.) - a required field on every real seriesDose, not optional. Real data: 484 total, 29 flagged "Yes", always the LAST dose of its series in the current dataset (though the spec's own change log confirms the algorithm now supports it on any target dose, not just the last).</summary>
+    public required bool IsRecurringDose { get; init; }
 }
 
 /// <summary>A date window (e.g. a flu season) outside of which a dose shouldn't be forecast. EndDate defaults to 12/31/2999 when absent (Table 7-9) - real COVID-19 data only specifies StartDate, meaning it never "expires" under this rule.</summary>

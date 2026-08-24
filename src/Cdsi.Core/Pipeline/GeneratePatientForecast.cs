@@ -17,9 +17,14 @@ namespace Cdsi.Core.Pipeline;
 /// AntigenSeries itself), so they're supplied here as dictionaries keyed by antigen name
 /// (matching AntigenSeries.Antigen) rather than re-loaded internally.
 ///
-/// KNOWN GAPS, consistent with every other round this project has flagged rather than guessed
-/// past: §7.5's `latestConflictEndDate`/`latestInadvertentAdministrationDate` remain unset
-/// (null) for every series - the forward-looking calculations they'd need don't exist yet.
+/// §6.2's "Completed Series" condition is now resolved for real, via two evaluation passes -
+/// see ResolveCompletedSeriesGroups for why that converges correctly for every real instance in
+/// the dataset. This is why `resolveCompletedSeries` is no longer part of this function's public
+/// signature at all: callers shouldn't need to know this internal mechanism exists.
+///
+/// REMAINING KNOWN GAPS, consistent with every other round this project has flagged rather than
+/// guessed past: §7.5's `latestConflictEndDate`/`latestInadvertentAdministrationDate` remain
+/// unset (null) for every series - the forward-looking calculations they'd need don't exist yet.
 /// §9.3's multi-antigen `anyContainedIsPriorityForecast`/`latestAdministeredDateOfGroupVaccineTypes`
 /// default to false/null for the same reason. Neither gap affects the (much more common)
 /// single-antigen vaccine groups or non-priority multi-antigen cases at all.
@@ -34,16 +39,37 @@ public static class GeneratePatientForecast
         IReadOnlyList<VaccineGroupInfo> vaccineGroups,
         IReadOnlyDictionary<string, AntigenImmunityData> immunityByAntigen,
         IReadOnlyDictionary<string, AntigenContraindicationData> contraindicationsByAntigen,
-        DateOnly assessmentDate,
-        Func<string?, bool> resolveCompletedSeries)
+        DateOnly assessmentDate)
     {
         // §5.1: which series even apply to this patient (gender, etc.)
         var relevantSeries = CreateRelevantPatientSeries.Execute(patient, allSeries, assessmentDate).RelevantSeries;
 
-        // §4.2/§4.4/§6: evaluate every relevant series' dose history, with real cross-antigen
-        // vaccine conflict resolution already wired in by EvaluatePatientSeriesHistory.
+        // Pass 1: evaluate assuming no series group is complete yet, purely to discover which
+        // ones actually are (SeriesHistoryResult.SeriesComplete) - §6.2's Completed Series
+        // condition needs this before it can be resolved for real.
+        var firstPassHistory = EvaluatePatientSeriesHistory.Execute(
+            patient, relevantSeries, administeredDoses, schedule.CvxToAntigen, schedule.ConflictsByImpactedCvx,
+            resolveCompletedSeries: (_, _) => false);
+        var resolveCompletedSeries = ResolveCompletedSeriesGroups.Build(firstPassHistory);
+
+        // Pass 2 (authoritative): §4.2/§4.4/§6, now with the real Completed Series resolver,
+        // plus the real cross-antigen vaccine conflict resolution EvaluatePatientSeriesHistory
+        // already wires in.
         var historyBySeries = EvaluatePatientSeriesHistory.Execute(
             patient, relevantSeries, administeredDoses, schedule.CvxToAntigen, schedule.ConflictsByImpactedCvx, resolveCompletedSeries);
+
+        // Patient-wide evaluated-dose history, one antigen's worth per antigen (matching
+        // EvaluatePatientSeriesHistory's own "only contribute once per antigen" simplification -
+        // see its doc comment), needed for cross-antigen forecast conflict resolution
+        // (CALCDTCONFLICT-3) the same way EvaluatePatientSeriesHistory itself needs it for §6.7.
+        var patientWideHistoryByAntigen = new Dictionary<string, IReadOnlyList<EvaluatedAntigenDose>>();
+        foreach (var (series, history) in historyBySeries)
+        {
+            if (!patientWideHistoryByAntigen.ContainsKey(series.Antigen))
+            {
+                patientWideHistoryByAntigen[series.Antigen] = history.AllEvaluatedDoses;
+            }
+        }
 
         // §7: forecast each series individually, grouping the results by antigen for §8.
         var membersByAntigen = new Dictionary<string, List<SeriesGroupMember>>();
@@ -55,8 +81,16 @@ public static class GeneratePatientForecast
                 throw new InvalidOperationException($"No immunity/contraindication data supplied for antigen '{series.Antigen}'.");
             }
 
+            var priorDosesAllAntigens = patientWideHistoryByAntigen
+                .Where(kv => kv.Key != series.Antigen)
+                .SelectMany(kv => kv.Value)
+                .Select(EvaluateDoseAgainstTargetDose.MapToPriorDoseForSkipOrConflict)
+                .ToArray();
+
             var forecast = GeneratePatientSeriesForecast.Execute(
-                patient, series, history, assessmentDate, immunity, contraindications, resolveCompletedSeries);
+                patient, series, history, assessmentDate, immunity, contraindications,
+                priorDosesAllAntigens, schedule.ConflictsByImpactedCvx,
+                groups => resolveCompletedSeries(series.Antigen, groups));
 
             if (!membersByAntigen.TryGetValue(series.Antigen, out var members))
             {
@@ -96,7 +130,19 @@ public static class GeneratePatientForecast
             var type = VaccineGroupClassification.Classify(antigensInGroup);
             var administerFull = vaccineGroups.FirstOrDefault(v => v.Name == vaccineGroupName)?.AdministerFullVaccineGroup ?? false;
 
-            results.Add(MergeVaccineGroupForecast.Execute(vaccineGroupName, type, administerFull, contained));
+            // §9.3 MULTIANTVG-1's two remaining inputs, only meaningful for multi-antigen groups
+            // (MMR, DTaP/Tdap/Td in real data) - harmless to compute for single-antigen groups
+            // too, since SingleAntigenVaccineGroup.EarliestDate never reads them.
+            var anyContainedIsPriorityForecast = contained.Any(x => x.Forecast.IsPriorityForecast);
+            var latestAdministeredDateOfGroupVaccineTypes = antigensInGroup
+                .Where(patientWideHistoryByAntigen.ContainsKey)
+                .SelectMany(antigen => patientWideHistoryByAntigen[antigen])
+                .Select(d => (DateOnly?)d.DateAdministered)
+                .Max();
+
+            results.Add(MergeVaccineGroupForecast.Execute(
+                vaccineGroupName, type, administerFull, contained,
+                anyContainedIsPriorityForecast, latestAdministeredDateOfGroupVaccineTypes));
         }
 
         return results;

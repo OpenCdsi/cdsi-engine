@@ -204,7 +204,8 @@ public static class AntigenSupportingDataLoader
                 .ToArray(),
             SeasonalRecommendation = el.Element("seasonalRecommendation") is XElement sr && HasChildren(sr)
                 ? new SeasonalRecommendation { StartDate = sr.ParseDateOrNull("startDate"), EndDate = sr.ParseDateOrNull("endDate") }
-                : null
+                : null,
+            IsRecurringDose = string.Equals(el.ElementTextOrNull("recurringDose"), "Yes", StringComparison.OrdinalIgnoreCase)
         };
     }
 

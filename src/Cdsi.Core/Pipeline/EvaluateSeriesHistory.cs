@@ -22,18 +22,30 @@ public sealed class SeriesHistoryResult
 /// Immunization History" sub-process (Figure 4-6), implementing its exact 7-step two-pointer
 /// algorithm over target doses and antigen-administered records.
 ///
-/// TWO THINGS NOT SPEC-GROUNDED, FLAGGED AS INFERENCES (the §4.4 algorithm only discusses
+/// RECURRING DOSE (§4.4 step 5) is now implemented. The spec's own text: on satisfying a target
+/// dose flagged recurring, "initialize a new target dose identical to the current target dose...
+/// immediately following the current target dose" and move to THAT clone next, rather than
+/// advancing to whatever's genuinely next in the series. This codebase achieves the identical
+/// logical effect without ever mutating or growing the target-dose array: when a recurring
+/// target dose is Satisfied, `targetIdx` simply doesn't advance - the SAME target dose (with its
+/// own already-general interval/age rules, typically `fromPrevious`) gets re-evaluated against
+/// the NEXT administered record, using the just-updated `targetDoseSatisfiedDates` entry as the
+/// new reference point. A "clone inserted after the original" and "the same slot re-used
+/// in-place" are observationally identical here, since nothing else in the array shifts either
+/// way. Confirmed against real data before implementing: every one of the 29 real recurring
+/// doses (Td boosters, annual COVID, occupational rabies exposure, etc.) is the LAST target dose
+/// in its series, so a genuinely recurring series is now correctly NEVER "complete" -
+/// `CurrentTargetDoseNumber` stays pinned on the recurring dose indefinitely, exactly matching
+/// the real-world fact that Td boosters, for instance, never stop being due every ~10 years.
+///
+/// ONE THING STILL NOT SPEC-GROUNDED, FLAGGED AS AN INFERENCE (the §4.4 algorithm only discusses
 /// "Satisfied" vs "Not Satisfied" - it predates/doesn't address Table 6-11's "Skipped" status):
-///   1. A Skipped target dose advances the target-dose pointer WITHOUT consuming the
-///      administered-dose pointer - the administered record remains available to be tried
-///      against the next target dose, since Skipped means "this target dose didn't need this
-///      dose at all," not "this dose satisfied it."
-///   2. Recurring Dose handling (§4.4 step 5) is NOT implemented - the spec gives it barely
-///      more than a one-line flag definition with no dedicated decision table, unlike every
-///      other component. All target doses are treated as non-recurring. This means series
-///      containing a genuinely recurring target dose (Td boosters, annual flu/COVID, some risk
-///      series) will evaluate incorrectly past that point - a known, real gap, not a
-///      theoretical one.
+/// a Skipped target dose advances the target-dose pointer WITHOUT consuming the
+/// administered-dose pointer - the administered record remains available to be tried against
+/// the next target dose, since Skipped means "this target dose didn't need this dose at all,"
+/// not "this dose satisfied it." This applies even to a recurring dose that gets Skipped - the
+/// spec's own step 5 text only triggers recurrence checking after step 4a (Satisfied), so a
+/// Skipped recurring dose is treated the same as any other Skipped dose (advance, don't clone).
 /// </summary>
 public static class EvaluateSeriesHistory
 {
@@ -76,7 +88,14 @@ public static class EvaluateSeriesHistory
                 targetDoseSatisfiedDates[targetDose.DoseNumber] = adminRecord.DateAdministered;
 
                 adminIdx++; // step 7 - this record is consumed either way, so advance unconditionally
-                targetIdx++; // step 6 (Recurring Dose step 5 not implemented - see class doc comment)
+
+                // step 5/6: a recurring target dose stays in place (re-evaluated against the
+                // next administered record, using the reference date just updated above) instead
+                // of advancing to a genuinely different target dose - see class doc comment.
+                if (!targetDose.IsRecurringDose)
+                {
+                    targetIdx++;
+                }
             }
             else if (result.TargetDoseStatus == TargetDoseStatus.Skipped)
             {

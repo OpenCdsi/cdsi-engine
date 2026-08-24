@@ -52,7 +52,8 @@ public class GeneratePatientSeriesForecastTests
 
         var forecast = GeneratePatientSeriesForecast.Execute(
             patient, HepB3DoseSeries, seriesHistory, assessmentDate: new DateOnly(2020, 9, 1),
-            HepBImmunity, HepBContraindications, NoCompletedSeriesExpected);
+            HepBImmunity, HepBContraindications,
+            Array.Empty<PriorVaccineDoseAdministered>(), Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
 
         Assert.Equal(PatientSeriesStatus.NotComplete, forecast.Status);
         Assert.True(forecast.ShouldForecast);
@@ -98,7 +99,8 @@ public class GeneratePatientSeriesForecastTests
 
         var forecast = GeneratePatientSeriesForecast.Execute(
             patient, HepB3DoseSeries, seriesHistory, assessmentDate: new DateOnly(2021, 1, 1),
-            HepBImmunity, HepBContraindications, NoCompletedSeriesExpected);
+            HepBImmunity, HepBContraindications,
+            Array.Empty<PriorVaccineDoseAdministered>(), Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
 
         Assert.Equal(PatientSeriesStatus.Complete, forecast.Status);
         Assert.False(forecast.ShouldForecast);
@@ -119,7 +121,8 @@ public class GeneratePatientSeriesForecastTests
 
         var forecast = GeneratePatientSeriesForecast.Execute(
             patient, HepB3DoseSeries, seriesHistory, assessmentDate: new DateOnly(2024, 1, 1),
-            HepBImmunity, HepBContraindications, NoCompletedSeriesExpected);
+            HepBImmunity, HepBContraindications,
+            Array.Empty<PriorVaccineDoseAdministered>(), Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
 
         Assert.Equal(PatientSeriesStatus.NotComplete, forecast.Status);
         Assert.True(forecast.ShouldForecast);
@@ -165,9 +168,165 @@ public class GeneratePatientSeriesForecastTests
 
         var forecast = GeneratePatientSeriesForecast.Execute(
             patient, syntheticSeries, seriesHistory, assessmentDate: new DateOnly(2024, 1, 1),
-            emptyImmunity, emptyContraindications, NoCompletedSeriesExpected);
+            emptyImmunity, emptyContraindications,
+            Array.Empty<PriorVaccineDoseAdministered>(), Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
 
         Assert.True(forecast.ShouldForecast);
         Assert.Contains("328", forecast.RecommendedVaccineCvxCodes);
+    }
+
+    [Fact]
+    public void RealMmrVaricellaConflict_RecentMmrDose_PushesVaricellaEarliestDateForward()
+    {
+        // Real conflict data: MMR (CVX "03") conflicts with Varicella (CVX "21"), conflictEndInterval
+        // "28 days". Patient is well past Varicella's own 12-month minAge, so without the conflict,
+        // EarliestDate would resolve to that old minAgeDate - the conflict, once wired through
+        // priorDosesAllAntigens, should dominate the MAX() instead and push it out to just after
+        // the conflict clears.
+        var varicellaSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Varicella-508.xml"))
+            .Single(s => s.SeriesName == "Varicella childhood 2-dose series");
+
+        var dob = new DateOnly(2019, 1, 1); // age 5 at assessment
+        var patient = MakePatient(dob);
+        var emptyImmunity = new AntigenImmunityData { ClinicalHistoryGuidelines = Array.Empty<ImmunityClinicalHistoryGuideline>(), BirthDateRules = Array.Empty<ImmunityBirthDateRule>() };
+        var emptyContraindications = new AntigenContraindicationData { AntigenLevel = Array.Empty<AntigenContraindication>(), VaccineLevel = Array.Empty<VaccineContraindication>() };
+
+        var seriesHistory = EvaluateSeriesHistory.Execute(
+            patient, varicellaSeries, Array.Empty<AntigenAdministered>(), Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        var assessmentDate = new DateOnly(2024, 1, 15);
+
+        var withoutConflict = GeneratePatientSeriesForecast.Execute(
+            patient, varicellaSeries, seriesHistory, assessmentDate, emptyImmunity, emptyContraindications,
+            Array.Empty<PriorVaccineDoseAdministered>(), Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        var mmrGivenRecently = new[] { new PriorVaccineDoseAdministered("03", new DateOnly(2024, 1, 1), PriorDoseEvaluationStatus.Valid) };
+        var withConflict = GeneratePatientSeriesForecast.Execute(
+            patient, varicellaSeries, seriesHistory, assessmentDate, emptyImmunity, emptyContraindications,
+            mmrGivenRecently, Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        Assert.True(withoutConflict.ShouldForecast);
+        Assert.True(withConflict.ShouldForecast);
+
+        // Without the conflict, EarliestDate resolves to Varicella's own (long-past) minAgeDate.
+        Assert.Equal(new DateOnly(2020, 1, 1), withoutConflict.Dates!.EarliestDate);
+
+        // With the conflict wired through, the MMR dose's conflict end date (2024-01-01 + 28
+        // days) dominates the MAX() instead, since it's later than the old minAgeDate.
+        Assert.Equal(new DateOnly(2024, 1, 29), withConflict.Dates!.EarliestDate);
+    }
+
+    [Fact]
+    public void InadvertentAdministrationInDoseResults_PushesEarliestDateForward()
+    {
+        // Extraction wiring test: seriesHistory.DoseResults already carries §6.3's own
+        // "Inadvertent Administration" reason string on real NotSatisfied/NotValid results
+        // (confirmed by re-reading EvaluateDoseAgainstTargetDose's source before writing this) -
+        // this proves GeneratePatientSeriesForecast actually extracts and uses it, not just that
+        // the filter compiles. Real COVID-19 data has genuine inadvertentVaccine entries (e.g.
+        // CVX "230"), but reconstructing a full real dose history isn't needed to test this
+        // specific extraction - a synthetic DoseResults entry with the real reason string,
+        // against the same real Varicella fixture used above, isolates just this piece.
+        var varicellaSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Varicella-508.xml"))
+            .Single(s => s.SeriesName == "Varicella childhood 2-dose series");
+
+        var dob = new DateOnly(2019, 1, 1);
+        var patient = MakePatient(dob);
+        var emptyImmunity = new AntigenImmunityData { ClinicalHistoryGuidelines = Array.Empty<ImmunityClinicalHistoryGuideline>(), BirthDateRules = Array.Empty<ImmunityBirthDateRule>() };
+        var emptyContraindications = new AntigenContraindicationData { AntigenLevel = Array.Empty<AntigenContraindication>(), VaccineLevel = Array.Empty<VaccineContraindication>() };
+
+        var inadvertentDoseRecord = new DoseEvaluationRecord(
+            new AntigenAdministered
+            {
+                Antigen = "Varicella",
+                Cvx = "94",
+                DateAdministered = new DateOnly(2024, 1, 10),
+                SourceDose = new VaccineDoseAdministered { DoseId = "d1", Cvx = "94", DateAdministered = new DateOnly(2024, 1, 10) }
+            },
+            TargetDoseNumber: null,
+            Result: TargetDoseEvaluationResult.NotSatisfied(EvaluationStatus.NotValid, "Inadvertent Administration"));
+
+        var seriesHistory = new SeriesHistoryResult
+        {
+            DoseResults = new[] { inadvertentDoseRecord },
+            AllEvaluatedDoses = Array.Empty<EvaluatedAntigenDose>(),
+            CurrentTargetDoseNumber = 1
+        };
+
+        var assessmentDate = new DateOnly(2024, 1, 15);
+        var forecast = GeneratePatientSeriesForecast.Execute(
+            patient, varicellaSeries, seriesHistory, assessmentDate, emptyImmunity, emptyContraindications,
+            Array.Empty<PriorVaccineDoseAdministered>(), Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        Assert.True(forecast.ShouldForecast);
+        // 2024-01-10 (the inadvertent administration date) dominates the MAX() over Varicella's
+        // own long-past minAgeDate (2020-01-01).
+        Assert.Equal(new DateOnly(2024, 1, 10), forecast.Dates!.EarliestDate);
+    }
+
+    [Fact]
+    public void RealPertussisSeries_IntervalPriorityOverrideFlag_ForecastIsMarkedAsPriority()
+    {
+        // Real data: "Pertussis standard series" Dose 2's own interval has intervalPriority
+        // "override" (the real-world equivalent of FORECASTPRIORITY-1's "Y" flag - see
+        // MultipleAntigenVaccineGroup's own doc comment for why "override" is the value that
+        // actually appears in real data). Pertussis genuinely belongs to the real multi-antigen
+        // DTaP/Tdap/Td vaccine group, which is exactly the scenario this field exists to support.
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+            .Single(s => s.SeriesName == "Pertussis standard series");
+
+        var dob = new DateOnly(2024, 1, 1);
+        var patient = MakePatient(dob);
+        var emptyImmunity = new AntigenImmunityData { ClinicalHistoryGuidelines = Array.Empty<ImmunityClinicalHistoryGuideline>(), BirthDateRules = Array.Empty<ImmunityBirthDateRule>() };
+        var emptyContraindications = new AntigenContraindicationData { AntigenLevel = Array.Empty<AntigenContraindication>(), VaccineLevel = Array.Empty<VaccineContraindication>() };
+
+        // One real Dose 1 (CVX "20", DTaP alone), safely past its own 6-week minAge.
+        var doses = new[] { new VaccineDoseAdministered { DoseId = "d1", Cvx = "20", DateAdministered = dob.AddDays(56) } };
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, doses, Schedule.CvxToAntigen);
+        var pertussisRecords = antigenRecords.Where(r => r.Antigen == "Pertussis").OrderBy(r => r.DateAdministered).ToArray();
+
+        var seriesHistory = EvaluateSeriesHistory.Execute(
+            patient, pertussisSeries, pertussisRecords, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        Assert.Equal(2, seriesHistory.CurrentTargetDoseNumber); // sanity check: Dose 1 satisfied, now forecasting Dose 2
+
+        var forecast = GeneratePatientSeriesForecast.Execute(
+            patient, pertussisSeries, seriesHistory, assessmentDate: dob.AddMonths(6),
+            emptyImmunity, emptyContraindications,
+            Array.Empty<PriorVaccineDoseAdministered>(), Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        Assert.True(forecast.ShouldForecast);
+        Assert.True(forecast.IsPriorityForecast);
+    }
+
+    [Fact]
+    public void RealHepBSeries_NoIntervalPriorityFlag_ForecastIsNotMarkedAsPriority()
+    {
+        // Contrast fixture: real HepB Dose 3 intervals have no intervalPriority flag at all
+        // (confirmed elsewhere in this project's grounding work) - IsPriorityForecast should be
+        // false, not just "true by default."
+        var dob = new DateOnly(2020, 1, 1);
+        var patient = MakePatient(dob);
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "08", DateAdministered = new DateOnly(2020, 1, 1) },
+            new VaccineDoseAdministered { DoseId = "d2", Cvx = "08", DateAdministered = new DateOnly(2020, 3, 1) }
+        };
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, doses, Schedule.CvxToAntigen);
+        var hepBRecords = antigenRecords.Where(r => r.Antigen == "HepB").OrderBy(r => r.DateAdministered).ToArray();
+
+        var seriesHistory = EvaluateSeriesHistory.Execute(
+            patient, HepB3DoseSeries, hepBRecords, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        var forecast = GeneratePatientSeriesForecast.Execute(
+            patient, HepB3DoseSeries, seriesHistory, assessmentDate: new DateOnly(2020, 9, 1),
+            HepBImmunity, HepBContraindications,
+            Array.Empty<PriorVaccineDoseAdministered>(), Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        Assert.True(forecast.ShouldForecast);
+        Assert.False(forecast.IsPriorityForecast);
     }
 }

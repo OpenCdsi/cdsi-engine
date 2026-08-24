@@ -4,15 +4,8 @@ using Cdsi.Core.ReferenceData;
 
 // Loads the FULL real CDC catalog (all 30 antigens + schedule) and runs a few sample patients
 // through GeneratePatientForecast end to end - the whole pipeline, real data, nothing mocked.
-//
-// resolveCompletedSeries: §6.2's "Completed Series" conditional-skip condition still needs a
-// real resolver (a documented, deliberate gap - see README). Running against the full catalog
-// means some antigen could genuinely reach that condition, unlike this project's narrow test
-// fixtures, which could safely assume it'd never be hit and use a throwing stub instead. Here,
-// a conservative default (no series group is ever "completed") is used instead - it won't
-// spuriously grant a skip that shouldn't happen, but it also means Completed-Series-gated skips
-// never fire. Worth knowing if a forecast below looks like it's missing an expected skip.
-Func<string?, bool> resolveCompletedSeries = _ => false;
+// §6.2's "Completed Series" condition is resolved internally via two evaluation passes -
+// GeneratePatientForecast handles this on its own, no caller-supplied resolver needed anymore.
 
 var dataRoot = FindDataDirectory();
 Console.WriteLine($"Loading full CDC catalog from: {dataRoot}");
@@ -52,7 +45,7 @@ void RunPatient(string label, DateOnly dob, IReadOnlyList<VaccineDoseAdministere
 
     var results = GeneratePatientForecast.Execute(
         patient, doses, repo.AllSeries, repo.Schedule, repo.VaccineGroups,
-        repo.ImmunityByAntigen, repo.ContraindicationsByAntigen, today, resolveCompletedSeries);
+        repo.ImmunityByAntigen, repo.ContraindicationsByAntigen, today);
 
     Console.WriteLine($"Vaccine group forecasts produced: {results.Count}");
     Console.WriteLine();

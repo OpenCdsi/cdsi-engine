@@ -23,8 +23,8 @@ public class EvaluatePatientSeriesHistoryTests
     private static readonly IReadOnlyList<AntigenSeries> VaricellaSeries =
         AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Varicella-508.xml"));
 
-    private static readonly Func<string?, bool> NoCompletedSeriesExpected =
-        _ => throw new InvalidOperationException("Test fixture shouldn't reach a Completed Series condition.");
+    private static readonly Func<string, string?, bool> NoCompletedSeriesExpected =
+        (_, _) => throw new InvalidOperationException("Test fixture shouldn't reach a Completed Series condition.");
 
     private static Patient MakePatient(DateOnly dob) => new() { PatientId = "p1", DateOfBirth = dob };
 
@@ -120,5 +120,53 @@ public class EvaluatePatientSeriesHistoryTests
         Assert.True(results.ContainsKey(heplisavSeries));
         Assert.Equal(2, results[threeDoseSeries].DoseResults.Count);
         Assert.Equal(2, results[heplisavSeries].DoseResults.Count);
+    }
+
+    [Fact]
+    public void RealHepB_TwoPassCompletedSeriesResolution_DialysisRiskSeriesDose1BecomesSkippable()
+    {
+        // §6.2's Completed Series condition, resolved for real: "HepB risk Dialysis 4-dose
+        // series" Dose 1 has a real conditionalSkip condition ("Completed Series" referencing
+        // group "1") - it should become skippable once the patient has genuinely completed
+        // "HepB 3-dose series" (the real group "1" Standard series), mirroring exactly the
+        // two-pass mechanism GeneratePatientForecast runs for real.
+        var hepBSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        var standardSeries = hepBSeries.Single(s => s.SeriesName == "HepB 3-dose series");
+        var dialysisSeries = hepBSeries.Single(s => s.SeriesName == "HepB risk Dialysis 4-dose series");
+
+        var dob = new DateOnly(2000, 1, 1);
+        var patient = MakePatient(dob);
+
+        // Three real, well-timed doses that fully satisfy "HepB 3-dose series" (age/interval
+        // thresholds for this exact series hand-verified repeatedly elsewhere in this project).
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "08", DateAdministered = dob },
+            new VaccineDoseAdministered { DoseId = "d2", Cvx = "08", DateAdministered = dob.AddMonths(2) },
+            new VaccineDoseAdministered { DoseId = "d3", Cvx = "08", DateAdministered = dob.AddMonths(8) }
+        };
+
+        var relevantSeries = new[] { standardSeries, dialysisSeries };
+
+        // Pass 1: assume nothing is complete yet, purely to discover what actually is.
+        var firstPass = EvaluatePatientSeriesHistory.Execute(
+            patient, relevantSeries, doses, Schedule.CvxToAntigen, Schedule.ConflictsByImpactedCvx,
+            resolveCompletedSeries: (_, _) => false);
+
+        Assert.True(firstPass[standardSeries].SeriesComplete); // sanity check before trusting the resolver built from this
+
+        var resolver = ResolveCompletedSeriesGroups.Build(firstPass);
+        Assert.True(resolver("HepB", "1"));
+
+        // Pass 2: with the real resolver, Dialysis Dose 1's Completed Series condition should
+        // now be met, meaning that target dose gets Skipped rather than left NotSatisfied.
+        var secondPass = EvaluatePatientSeriesHistory.Execute(
+            patient, relevantSeries, doses, Schedule.CvxToAntigen, Schedule.ConflictsByImpactedCvx, resolver);
+
+        var dialysisDose1Result = secondPass[dialysisSeries].DoseResults
+            .SingleOrDefault(r => r.TargetDoseNumber == 1);
+
+        Assert.NotNull(dialysisDose1Result);
+        Assert.Equal(TargetDoseStatus.Skipped, dialysisDose1Result!.Result.TargetDoseStatus);
     }
 }

@@ -25,6 +25,9 @@ public sealed class PatientSeriesForecastResult
 
     /// <summary>§7.6 Validate Recommendation - null when not applicable (not forecasting).</summary>
     public bool? IsValidRecommendation { get; init; }
+
+    /// <summary>FORECASTPRIORITY-1 - false when ShouldForecast is false (nothing to be a priority forecast about). Consumed by §9.3's MULTIANTVG-1 when merging multi-antigen vaccine group forecasts (MMR, DTaP/Tdap/Td in real data).</summary>
+    public bool IsPriorityForecast { get; init; }
 }
 
 /// <summary>
@@ -35,12 +38,15 @@ public sealed class PatientSeriesForecastResult
 /// vaccine group forecasts) orchestration layers are still separate, larger pieces on top of
 /// this one, not included here.
 ///
-/// TWO INPUTS REMAIN CALLER-SUPPLIED, matching the gaps already flagged in §7.5's own README
-/// notes - `latestConflictEndDate` and `latestInadvertentAdministrationDate` feed
-/// FORECASTDTCAN-1's candidate earliest date calculation but need forward-looking calculations
-/// (a "will this future dose conflict with what's already been given" check, and inadvertent-
-/// administration tracking) that don't exist yet. Pass null for either until they do - the
-/// candidate earliest date calculation already treats null components as "skip," not a sentinel.
+/// FORECASTDTCAN-1's `latestConflictEndDate` and `latestInadvertentAdministrationDate`
+/// components are now resolved for real (previously caller-supplied placeholders, always null):
+/// - `latestInadvertentAdministrationDate` is a plain extraction from `seriesHistory.DoseResults`
+///   (already-computed §6.3 evaluation results) - "any target dose in this series whose
+///   evaluation reason was 'Inadvertent Administration'," per FORECASTDTCAN-1's own "a target
+///   dose that is part of a patient series" (not scoped to just the currently-forecast dose).
+/// - `latestConflictEndDate` is CALCDTCONFLICT-3, a genuine new forward-looking calculation
+///   (see ForecastConflictEndDate) - reuses the exact same VaccineConflictRule reference data
+///   §6.7 already uses, just walked forward instead of backward.
 /// </summary>
 public static class GeneratePatientSeriesForecast
 {
@@ -51,9 +57,9 @@ public static class GeneratePatientSeriesForecast
         DateOnly assessmentDate,
         AntigenImmunityData immunityData,
         AntigenContraindicationData contraindicationData,
-        Func<string?, bool> resolveCompletedSeries,
-        DateOnly? latestConflictEndDate = null,
-        DateOnly? latestInadvertentAdministrationDate = null)
+        IReadOnlyList<PriorVaccineDoseAdministered> priorDosesAllAntigens,
+        IReadOnlyDictionary<string, IReadOnlyList<VaccineConflictRule>> conflictsByImpactedCvx,
+        Func<string?, bool> resolveCompletedSeries)
     {
         var hasNotSatisfiedTargetDose = !seriesHistory.SeriesComplete;
         var hasSatisfiedTargetDose = seriesHistory.AllEvaluatedDoses.Any(d => d.SatisfiedTargetDoseNumber is not null);
@@ -92,6 +98,15 @@ public static class GeneratePatientSeriesForecast
                 ? seriesHistory.AllEvaluatedDoses.Max(d => d.DateAdministered)
                 : (DateOnly?)null;
             var seasonalStart = seasonalRecommendation?.StartDate ?? new DateOnly(1900, 1, 1);
+
+            var latestInadvertentAdministrationDate = seriesHistory.DoseResults
+                .Where(r => r.Result.Reason == "Inadvertent Administration")
+                .Select(r => (DateOnly?)r.AdministeredDose.DateAdministered)
+                .Max();
+
+            var latestConflictEndDate = ForecastConflictEndDate.LatestConflictEndDate(
+                currentTargetDose.PreferableVaccines.Select(pv => pv.Cvx).ToArray(),
+                priorDosesAllAntigens, conflictsByImpactedCvx);
 
             candidateEarliestDate = GenerateForecastDates.CalculateCandidateEarliestDate(
                 minAgeDate, latestMinIntervalDate, latestConflictEndDate, seasonalStart,
@@ -151,6 +166,17 @@ public static class GeneratePatientSeriesForecast
         var isValid = ValidateRecommendation.IsValid(
             patient.DateOfBirth, dates.EarliestDate, currentTargetDose.ConditionalSkipInstances, priorForSkip, resolveCompletedSeries);
 
+        // FORECASTPRIORITY-1: one applicable PreferableIntervalRule per reference-point group,
+        // resolved the same way ForecastIntervalDates does internally - reused via
+        // EvaluatePreferableInterval.GroupByReferencePoint rather than re-implemented, so this
+        // can't drift from how §7.5's own interval resolution already works. Anchored to
+        // EarliestDate, the same reference point CalculateForecastDates already uses for its own
+        // interval lookups.
+        var applicableIntervals = EvaluatePreferableInterval.GroupByReferencePoint(currentTargetDose.PreferableIntervals)
+            .Select(group => TemporalRuleSelector.SelectApplicable(group, dates.EarliestDate))
+            .ToArray();
+        var isPriorityForecast = MultipleAntigenVaccineGroup.IsPriorityPatientSeriesForecast(applicableIntervals);
+
         return new PatientSeriesForecastResult
         {
             Status = forecastNeed.PatientSeriesStatus,
@@ -161,7 +187,8 @@ public static class GeneratePatientSeriesForecast
             AllPreferableVaccineCvxCodes = allPlausibleVaccines,
             ForecastDoseNumber = forecastDoseNumber,
             Guidance = guidance,
-            IsValidRecommendation = isValid
+            IsValidRecommendation = isValid,
+            IsPriorityForecast = isPriorityForecast
         };
     }
 

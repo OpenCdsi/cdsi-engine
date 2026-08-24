@@ -133,4 +133,91 @@ public class EvaluateSeriesHistoryTests
         Assert.Equal(1, result.CurrentTargetDoseNumber);
         Assert.Empty(result.DoseResults);
     }
+
+    [Fact]
+    public void RealTetanusTdBooster_RecurringDose_SatisfiesRepeatedlyWithoutBecomingExtraneous()
+    {
+        // Real data: "Tetanus standard series" Dose 11 is flagged recurringDose="Yes" - a
+        // genuine Td-booster scenario (fromPrevious interval, minInt "5 years", earliestRecInt
+        // "10 years", no age gate). Wrapped as a synthetic 2-dose series (real Dose 10 + Dose 11
+        // objects, extracted directly from the loaded file) so this exercises the real
+        // reference data without needing all 11 real doses satisfied first.
+        var tetanusSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Tetanus-508.xml"))
+            .Single(s => s.SeriesName == "Tetanus standard series");
+        var dose10 = tetanusSeries.SeriesDoses.Single(d => d.DoseNumber == 10);
+        var dose11 = tetanusSeries.SeriesDoses.Single(d => d.DoseNumber == 11);
+        Assert.True(dose11.IsRecurringDose); // sanity check on the real fixture itself
+
+        var syntheticSeries = new AntigenSeries
+        {
+            SeriesName = "Synthetic Tetanus Dose10+11 (test fixture)",
+            Antigen = "Tetanus",
+            SeriesType = SeriesType.Standard,
+            RequiredGenders = Array.Empty<Gender>(),
+            Indications = Array.Empty<Indication>(),
+            SeriesDoses = new[] { dose10, dose11 },
+            SeriesAdminGuidance = Array.Empty<string>(),
+            SeriesGroupInfo = new SeriesGroupInfo { IsDefaultSeries = true, IsProductPath = false, SeriesGroupName = "Test", SeriesGroup = "1", SeriesPriority = "A", SeriesPreference = 1 }
+        };
+
+        var dob = new DateOnly(2010, 1, 1);
+        var patient = MakePatient(dob);
+
+        // Dose 10 satisfied once (age 11+, past its own minAge), then three separate Td
+        // boosters spaced 10 years apart each - well past Dose 11's 5-year absolute floor.
+        var doses = new[]
+        {
+            new AntigenAdministered { Antigen = "Tetanus", Cvx = "09", DateAdministered = new DateOnly(2021, 6, 1), SourceDose = new VaccineDoseAdministered { DoseId = "d1", Cvx = "09", DateAdministered = new DateOnly(2021, 6, 1) } },
+            new AntigenAdministered { Antigen = "Tetanus", Cvx = "09", DateAdministered = new DateOnly(2031, 6, 1), SourceDose = new VaccineDoseAdministered { DoseId = "d2", Cvx = "09", DateAdministered = new DateOnly(2031, 6, 1) } },
+            new AntigenAdministered { Antigen = "Tetanus", Cvx = "09", DateAdministered = new DateOnly(2041, 6, 1), SourceDose = new VaccineDoseAdministered { DoseId = "d3", Cvx = "09", DateAdministered = new DateOnly(2041, 6, 1) } },
+            new AntigenAdministered { Antigen = "Tetanus", Cvx = "09", DateAdministered = new DateOnly(2051, 6, 1), SourceDose = new VaccineDoseAdministered { DoseId = "d4", Cvx = "09", DateAdministered = new DateOnly(2051, 6, 1) } }
+        };
+
+        var result = EvaluateSeriesHistory.Execute(
+            patient, syntheticSeries, doses, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        // All four doses (Dose 10 once, Dose 11 three separate times) must be Satisfied - the
+        // pre-fix behavior would have marked the 2nd and 3rd boosters "Extraneous" instead,
+        // since targetIdx would have advanced past Dose 11 (out of bounds) after the first one.
+        Assert.Equal(4, result.DoseResults.Count);
+        Assert.All(result.DoseResults, r => Assert.Equal(TargetDoseStatus.Satisfied, r.Result.TargetDoseStatus));
+
+        Assert.Equal(10, result.DoseResults[0].TargetDoseNumber);
+        Assert.Equal(11, result.DoseResults[1].TargetDoseNumber);
+        Assert.Equal(11, result.DoseResults[2].TargetDoseNumber);
+        Assert.Equal(11, result.DoseResults[3].TargetDoseNumber);
+
+        // A genuinely recurring series is never "complete" - there's always another booster due.
+        Assert.False(result.SeriesComplete);
+        Assert.Equal(11, result.CurrentTargetDoseNumber);
+
+        // Three separate EvaluatedAntigenDose entries legitimately share SatisfiedTargetDoseNumber
+        // 11 - each represents a genuinely different calendar occurrence of the same recurring
+        // requirement, not a data error.
+        Assert.Equal(3, result.AllEvaluatedDoses.Count(d => d.SatisfiedTargetDoseNumber == 11));
+    }
+
+    [Fact]
+    public void RealHepBSeries_NoRecurringDoseFlag_UnchangedBehavior_SeriesCompletesNormally()
+    {
+        // Regression check: a non-recurring series (real HepB, all 3 doses) must still complete
+        // normally after this round's change - targetIdx should advance past every dose exactly
+        // as before, since IsRecurringDose is false for real HepB doses.
+        var dob = new DateOnly(2020, 1, 1);
+        var patient = MakePatient(dob);
+        var doses = new[]
+        {
+            new AntigenAdministered { Antigen = "HepB", Cvx = "08", DateAdministered = new DateOnly(2020, 1, 1), SourceDose = new VaccineDoseAdministered { DoseId = "d1", Cvx = "08", DateAdministered = new DateOnly(2020, 1, 1) } },
+            new AntigenAdministered { Antigen = "HepB", Cvx = "08", DateAdministered = new DateOnly(2020, 3, 1), SourceDose = new VaccineDoseAdministered { DoseId = "d2", Cvx = "08", DateAdministered = new DateOnly(2020, 3, 1) } },
+            new AntigenAdministered { Antigen = "HepB", Cvx = "08", DateAdministered = new DateOnly(2020, 9, 1), SourceDose = new VaccineDoseAdministered { DoseId = "d3", Cvx = "08", DateAdministered = new DateOnly(2020, 9, 1) } }
+        };
+
+        var result = EvaluateSeriesHistory.Execute(
+            patient, HepB3DoseSeries, doses, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        Assert.True(result.SeriesComplete);
+        Assert.Null(result.CurrentTargetDoseNumber);
+    }
 }
