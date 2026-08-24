@@ -4,18 +4,20 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-# Copy project files first (not the full source tree) so `dotnet restore` is cached across
-# builds unless a .csproj actually changes - a real, if small, speed win during iteration.
-COPY Cdsi.sln .
+# Only the .csproj files Cdsi.Api actually depends on (itself, Cdsi.Contracts, Cdsi.Core) are
+# copied for the restore-caching step - restoring Cdsi.Api.csproj directly (not the whole
+# Cdsi.sln) means this image build never needs to know about Cdsi.Demo, Cdsi.Functions, or
+# either test project, none of which are part of what gets published here. Also means adding a
+# new project to the solution later doesn't require touching this Dockerfile unless Cdsi.Api
+# itself gains a new dependency.
 COPY src/Cdsi.Core/Cdsi.Core.csproj src/Cdsi.Core/
+COPY src/Cdsi.Contracts/Cdsi.Contracts.csproj src/Cdsi.Contracts/
 COPY src/Cdsi.Api/Cdsi.Api.csproj src/Cdsi.Api/
-COPY src/Cdsi.Demo/Cdsi.Demo.csproj src/Cdsi.Demo/
-COPY tests/Cdsi.Core.Tests/Cdsi.Core.Tests.csproj tests/Cdsi.Core.Tests/
-COPY tests/Cdsi.Api.Tests/Cdsi.Api.Tests.csproj tests/Cdsi.Api.Tests/
-RUN dotnet restore Cdsi.sln
+RUN dotnet restore src/Cdsi.Api/Cdsi.Api.csproj
 
-COPY src/ src/
-COPY tests/ tests/
+COPY src/Cdsi.Core/ src/Cdsi.Core/
+COPY src/Cdsi.Contracts/ src/Cdsi.Contracts/
+COPY src/Cdsi.Api/ src/Cdsi.Api/
 RUN dotnet publish src/Cdsi.Api/Cdsi.Api.csproj -c Release -o /app --no-restore
 
 # Runtime stage - the smaller ASP.NET runtime image, not the full SDK.

@@ -4,7 +4,7 @@
 
 using Cdsi.Core.Pipeline;
 
-namespace Cdsi.Api.Contracts;
+namespace Cdsi.Contracts;
 
 public static class ResponseMapping
 {

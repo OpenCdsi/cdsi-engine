@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-namespace Cdsi.Api.Contracts;
+namespace Cdsi.Contracts;
 
 /// <summary>The full response body for POST /api/v1/forecast - one entry per vaccine group.</summary>
 public sealed class ForecastResponseDto

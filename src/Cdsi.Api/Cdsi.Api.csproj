@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Cdsi.Core\Cdsi.Core.csproj" />
+    <ProjectReference Include="..\Cdsi.Contracts\Cdsi.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

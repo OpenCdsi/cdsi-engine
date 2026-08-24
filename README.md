@@ -273,10 +273,16 @@ src/Cdsi.Demo/
                      `dotnet run --project src/Cdsi.Demo` from the repo root.
 src/Cdsi.Api/
                      Minimal-API ASP.NET Core 8 web service wrapping GeneratePatientForecast.
-                     Contracts/ holds the request/response DTOs and their mapping to/from
-                     Cdsi.Core's domain models. `dotnet run --project src/Cdsi.Api`, or
-                     `docker compose up --build` from the repo root — see "Cdsi.Api — the
-                     dockerized web API" below.
+                     `dotnet run --project src/Cdsi.Api`, or `docker compose up --build` from
+                     the repo root — see "Cdsi.Api — the dockerized web API" below.
+src/Cdsi.Contracts/
+                     Request/response DTOs and their mapping to/from Cdsi.Core's domain models -
+                     shared between Cdsi.Api and Cdsi.Functions, so both API surfaces produce
+                     and consume identical JSON shapes from one implementation, not two.
+src/Cdsi.Functions/
+                     Azure Functions (isolated worker) - the same GeneratePatientForecast call,
+                     as a second API surface. See "Cdsi.Functions — Azure Functions as a second
+                     API surface" below, including honest caveats about what's unverified.
 tests/Cdsi.Api.Tests/
                      Real HTTP integration tests via WebApplicationFactory<Program> - the
                      actual Program.cs startup running in-memory against the real data/
@@ -1414,6 +1420,142 @@ properties, including the following: dateOfBirth") over the outer exception's mo
 when available - both details visible directly in the failing test's own captured log output,
 not guessed at.
 
+## `Cdsi.Functions` — Azure Functions as a second API surface
+
+The second API surface this project was always heading toward, reusing the exact same forecast
+logic and request/response shapes as `Cdsi.Api` - not a parallel reimplementation.
+
+### A real refactor first: `Cdsi.Contracts`, extracted before anything new was built
+
+Rather than duplicate `ForecastRequestDto`/`ForecastResponseDto`/`RequestMapping`/
+`ResponseMapping`/`InvalidRequestException` into a second project, they were extracted from
+`Cdsi.Api/Contracts/` into a new, small shared project (`Cdsi.Contracts`, referencing only
+`Cdsi.Core`) that both `Cdsi.Api` and `Cdsi.Functions` now depend on. Both API surfaces produce
+and consume identical JSON shapes because they share the literal same mapping code, not because
+two independently-written implementations happen to agree. Confirmed before starting that
+`Cdsi.Api.Tests` doesn't reference the DTO namespace directly (it works over real HTTP/JSON), so
+the extraction only touched `Cdsi.Api` itself - swept the whole repo afterward for any leftover
+`Cdsi.Api.Contracts` reference to confirm nothing was missed.
+
+### Package versions, verified the same way as `Cdsi.Api`'s
+
+This sandbox still can't restore packages or run `dotnet build`, so every version here was
+checked against real, current NuGet listings and a real working example project (not a single
+source) before being written into a `.csproj`:
+
+- **`Microsoft.Azure.Functions.Worker` / `.Worker.Sdk` / `.Worker.Extensions.Http.AspNetCore`,
+  all `2.0.0`** - cross-referenced against Microsoft Learn's own official isolated-worker guide
+  (which recommends the `Http.AspNetCore` extension, version 1.0.0+) and a real, working example
+  project using this exact version across all three packages together.
+- **`FunctionsApplication.CreateBuilder(args)` + `ConfigureFunctionsWebApplication()`** - the
+  current Microsoft-documented bootstrap pattern (not the older `new HostBuilder()...Build()`
+  style still shown in some third-party blog posts, which still works but is being superseded) -
+  deliberately chosen to mirror `WebApplication.CreateBuilder(args)`'s own shape, the same style
+  already used in `Cdsi.Api`.
+
+### `AuthorizationLevel.Function` — access control that comes free with this surface
+
+Directly relevant to the earlier conversation about adding API key auth to `Cdsi.Api` (held off
+on, pending more thought about how clients will actually use the API): Azure Functions' HTTP
+triggers have built-in key-based access control out of the box.
+`[HttpTrigger(AuthorizationLevel.Function, ...)]` on `GenerateForecast` means every request needs
+a valid function or host key by default - Azure manages issuing and rotating these keys itself,
+no code required. `Health` stays `AuthorizationLevel.Anonymous`, matching `Cdsi.Api`'s own
+unauthenticated `/health` endpoint - a liveness check shouldn't need a key. Worth factoring into
+whatever gets decided for `Cdsi.Api`'s own access control later - the two surfaces don't need
+identical mechanisms, but it's useful context that one of them already has something built in.
+
+### Route parity with `Cdsi.Api`, deliberately
+
+`GenerateForecast` and `Health` resolve to `/api/v1/forecast` and `/health` respectively -
+exactly matching `Cdsi.Api`'s own paths. This took a real correction along the way: Azure
+Functions defaults to an `"api"` route prefix automatically, and an initial draft additionally
+set `routePrefix: "api"` explicitly in `host.json` - redundant with the default, and combined
+with the function-level `Route` attributes, would have produced `/api/health` instead of the
+intended `/health`, breaking parity with `Cdsi.Api`. Fixed by setting `routePrefix: ""` (removing
+the default prefix entirely) and writing each function's own `Route` attribute to spell out the
+full intended path explicitly (`"api/v1/forecast"`, `"health"`) - full, explicit control instead
+of relying on a default that didn't do what was needed here.
+
+### A deliberate design difference from `Cdsi.Api`, not an oversight
+
+`Cdsi.Api`'s `Program.cs` resolves `ReferenceDataRepository` eagerly at startup, before the app
+starts listening, so a bad data path fails fast with a clear startup error. `Cdsi.Functions`'
+`Program.cs` does not do this - the isolated-worker host's exact startup lifecycle (whether
+resolving a service from `app.Services` before `Run()` behaves identically to
+`WebApplication`'s own) isn't something this sandbox could verify, and getting an unfamiliar
+pattern wrong here risked breaking startup entirely rather than just delaying when an error
+surfaces. Data loads lazily on the first real request instead - flagged directly in the code
+comment so this reads as a deliberate, reasoned choice under real uncertainty, not something
+missed.
+
+### Running it locally
+
+`local.settings.json` (Functions' own local-dev configuration, analogous to `Cdsi.Api`'s
+`launchSettings.json`) is gitignored, since it's a real, if currently placeholder-only, place
+secrets can end up in a genuine deployment - the standard Azure Functions convention. A committed
+`local.settings.json.example` is the template: copy it to `local.settings.json` before running
+locally with Azure Functions Core Tools (`func start` from `src/Cdsi.Functions`). `CDSI_DATA_PATH`
+can be added to its `Values` section to override the same `FindDataDirectory` walk-up default
+`Cdsi.Api` and `Cdsi.Demo` already use.
+
+Without a local `local.settings.json` at all (the gitignored convention above kept as-is), `func
+start` can't determine `FUNCTIONS_WORKER_RUNTIME` and fails with "Worker runtime cannot be
+'None'" - the CLI's own error message suggests passing it explicitly instead:
+`func start --dotnet-isolated`. Not yet confirmed against a real run whether this alone is
+sufficient, or whether `func start` also needs `AzureWebJobsStorage` set (via
+`local.settings.json`, or Azurite running locally) for this project's HTTP-trigger-only setup -
+worth updating this note once that's actually been tried.
+
+### Confirmed end-to-end, against real execution - the same standard as `Cdsi.Api`
+
+Every layer of `Cdsi.Functions` has now actually run, not just been reasoned about.
+
+`func start --dotnet-isolated` starts the host, and both functions register at exactly the
+intended routes - real confirmation that the route-parity fix (clearing Functions' own default
+`"api"` prefix and spelling out each function's full intended path explicitly) works exactly as
+designed:
+
+```
+GenerateForecast: [POST] http://localhost:7071/api/v1/forecast
+Health: [GET] http://localhost:7071/health
+```
+
+The one thing the host itself flagged along the way - `azure.functions.webjobs.storage:
+Unhealthy - Unable to create client for AzureWebJobsStorage` - is a standard, well-known Azure
+Functions requirement, not a bug introduced here: the host uses Azure Storage for its own
+internal bookkeeping even for a purely HTTP-triggered app like this one, and
+`local.settings.json.example`'s `UseDevelopmentStorage=true` placeholder needs a real local
+storage emulator (Azurite: `npm install -g azurite && azurite --silent`) to actually satisfy it.
+Confirmed directly that this does *not* block real HTTP request handling either way.
+
+`GET /health` returned real, correct data-loading counts
+(`{"seriesCount":143,"antigenCount":30,"vaccineGroupCount":26}`) - confirming the one design
+choice that carried genuine uncertainty (lazy data loading on first request, deliberately
+different from `Cdsi.Api`'s own eager startup resolution, since this sandbox couldn't verify the
+isolated-worker host's exact startup lifecycle) genuinely works as intended.
+
+`POST /api/v1/forecast` with a real patient returned a complete, correct forecast across all 15
+real vaccine groups - and remarkably, every real-data pattern this project has discovered over
+its whole history shows up correctly in that one response: Zoster's 50-year gate, HPV's 9-to-11
+year age/recommendation split, Pneumococcal as the one antigen with populated
+`recommendedVaccineCvxCodes`, Rotavirus `AgedOut`, Influenza's seasonal `NotRecommended`, and RSV
+showing the exact "no healthy-toddler pathway, only the 75+ series remains" finding from the
+HepB/RSV investigation many rounds ago - now confirmed again on a different patient age. This
+also settles the last open question about `HttpRequest.ReadFromJsonAsync<T>()` for the success
+path, and `assessmentDate` correctly defaulted to the real current date when omitted from the
+request.
+
+**`Cdsi.Functions` is now confirmed to the same real-execution standard as `Cdsi.Api`, success
+and failure paths alike** - builds clean, starts clean, and produces output identical in
+substance to every other verified surface of this project (`Cdsi.Demo`, `Cdsi.Api`, the
+327-test suite). A request missing `dateOfBirth` returned a clean 400 with the exact, specific
+detail the `JsonException` catch clause was designed to surface -
+`"was missing required properties, including the following: dateOfBirth"` - confirming
+`ReadFromJsonAsync<T>()` does throw `System.Text.Json.JsonException` directly for this case, the
+last genuinely open assumption in this whole section. Nothing about this API surface remains
+unverified.
+
 ## Next steps
 
 **The end-to-end pipeline is complete and has been run successfully against the real, full
@@ -1439,13 +1581,17 @@ setting, which is the intended behavior working as designed, not a problem.
 
 What remains, roughly in order of what's most valuable next:
 
-1. **Azure Functions as a second API surface, wrapping the same `GeneratePatientForecast` call**
-   - explicitly requested as the next phase after the dockerized API. Likely an isolated-worker
-     Azure Functions project (`Cdsi.Functions`) sharing `Cdsi.Core` and possibly `Cdsi.Api`'s own
-     `Contracts` DTOs/mapping layer, rather than duplicating the request/response shapes.
+1. **`Cdsi.Functions` (Azure Functions) is now built** - see "`Cdsi.Functions` — Azure Functions
+   as a second API surface" above, including the `Cdsi.Contracts` extraction that came with it
+   and a full, honest account of what's genuinely unverified without Azure Functions Core Tools
+   available in this sandbox.
+2. API access control for `Cdsi.Api` - explicitly held off on pending more thought about how
+   clients will actually use the API, per the earlier conversation. `Cdsi.Functions` already has
+   `AuthorizationLevel.Function` key-based access on its forecast endpoint, worth factoring in
+   once this gets revisited.
 
 At this point, every piece of this project - the core engine (all four chapters, all four
-originally-documented gaps), the full 18-series HepB competition, MPL 2.0 licensing, and the
-dockerized API - has been confirmed against a real `dotnet test`/`docker compose up` run, not
-just reasoned about from this sandbox. Azure Functions is the one remaining piece still ahead of
-that verification.
+originally-documented gaps), the full 18-series HepB competition, MPL 2.0 licensing, and both API
+surfaces (`Cdsi.Api` and `Cdsi.Functions`, success and failure paths alike) - has been confirmed
+against real execution, not just reasoned about from this sandbox. Nothing built so far remains
+unverified.

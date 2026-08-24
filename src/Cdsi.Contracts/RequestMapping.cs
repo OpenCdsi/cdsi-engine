@@ -4,7 +4,7 @@
 
 using Cdsi.Core.Models;
 
-namespace Cdsi.Api.Contracts;
+namespace Cdsi.Contracts;
 
 /// <summary>Maps the wire-format request DTO to Cdsi.Core's domain models. Kept as one small, testable static class rather than inlined into the endpoint handler, so the mapping itself can be unit tested without spinning up a WebApplicationFactory.</summary>
 public static class RequestMapping
