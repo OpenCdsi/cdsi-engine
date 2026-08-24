@@ -12,7 +12,13 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
-    options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+    // Microsoft.OpenApi.Models.OpenApiInfo (correct for Swashbuckle 6.x/Microsoft.OpenApi 1.x)
+    // was replaced by Microsoft.OpenApi.OpenApiInfo when this project moved to Swashbuckle
+    // 10.2.3/Microsoft.OpenApi 2.x alongside the net8.0 -> net10.0 upgrade - the old
+    // Microsoft.OpenApi.Models namespace no longer exists in the v2.x line at all. Caught by
+    // checking Swashbuckle's own official v10 migration guide before trusting the version bump
+    // alone would be enough - it explicitly wasn't.
+    options.SwaggerDoc("v1", new Microsoft.OpenApi.OpenApiInfo
     {
         Title = "CDSi Immunization Engine API",
         Version = "v1",

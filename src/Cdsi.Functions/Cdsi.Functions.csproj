@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <AzureFunctionsVersion>v4</AzureFunctionsVersion>
     <OutputType>Exe</OutputType>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -15,13 +15,17 @@
          triggers, rather than the older HttpRequestData/HttpResponseData model - lets
          ForecastFunction.cs read the request body the same way Cdsi.Api's own minimal API
          endpoint does, instead of a second, different HTTP-handling style for the same DTOs.
-         Versions confirmed against real, current NuGet listings and a real working example
-         before being written here (this sandbox can't restore/build to verify directly) -
-         see README. -->
+         Versions bumped for real, confirmed net10.0 compatibility when this project moved off
+         net8.0 (Azure Functions .NET 10 isolated-worker support is GA as of Ignite 2025;
+         Microsoft's own guidance is "SDK 2.0.0 or later" for .NET 9+, and these are the current
+         published versions as of that search, not the original 2.0.0 baseline this project
+         started with) - see README for the full account, including two real, currently-open
+         GitHub issues about .NET 10 Azure Functions deployment that are worth knowing about
+         before actually deploying, not just building locally. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <PackageReference Include="Microsoft.Azure.Functions.Worker" Version="2.0.0" />
-    <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore" Version="2.0.0" />
-    <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.0.0">
+    <PackageReference Include="Microsoft.Azure.Functions.Worker" Version="2.52.0" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore" Version="2.1.1" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.0.7">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>

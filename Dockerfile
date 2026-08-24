@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Build stage
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Only the .csproj files Cdsi.Api actually depends on (itself, Cdsi.Contracts, Cdsi.Core) are
@@ -21,7 +21,7 @@ COPY src/Cdsi.Api/ src/Cdsi.Api/
 RUN dotnet publish src/Cdsi.Api/Cdsi.Api.csproj -c Release -o /app --no-restore
 
 # Runtime stage - the smaller ASP.NET runtime image, not the full SDK.
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
 # curl isn't present in the base aspnet image by default - installed specifically so

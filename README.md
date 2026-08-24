@@ -1369,10 +1369,14 @@ web search *before* being written into a `.csproj`, not guessed:
   during that search) as the release that added native .NET 8 support, rather than picking
   whatever the newest major version happened to be (10.2.3 at the time of writing, which
   introduces its own breaking changes around `Microsoft.OpenApi` 2.x). A deliberately
-  conservative, confirmed-compatible choice over the newest one.
+  conservative, confirmed-compatible choice over the newest one. **Superseded**: the exact
+  tension flagged here turned out to matter for real once the net8.0 → net10.0 migration
+  actually happened - see "Migrating to .NET 10" below for the full account, including a real
+  compile break this same `Microsoft.OpenApi` v2.x change caused.
 - **`Microsoft.AspNetCore.Mvc.Testing` 8.0.11** - matches the runtime major.minor (`net8.0`)
   exactly, the standard alignment convention for first-party ASP.NET Core packages, confirmed to
-  exist as a real published version rather than assumed.
+  exist as a real published version rather than assumed. **Superseded**: now `10.0.11`, same
+  convention, updated as part of the same migration.
 
 ### Tests
 
@@ -1446,7 +1450,9 @@ source) before being written into a `.csproj`:
 - **`Microsoft.Azure.Functions.Worker` / `.Worker.Sdk` / `.Worker.Extensions.Http.AspNetCore`,
   all `2.0.0`** - cross-referenced against Microsoft Learn's own official isolated-worker guide
   (which recommends the `Http.AspNetCore` extension, version 1.0.0+) and a real, working example
-  project using this exact version across all three packages together.
+  project using this exact version across all three packages together. **Superseded**: bumped to
+  `2.52.0`/`2.0.7`/`2.1.1` respectively as part of the net8.0 → net10.0 migration - see
+  "Migrating to .NET 10" below.
 - **`FunctionsApplication.CreateBuilder(args)` + `ConfigureFunctionsWebApplication()`** - the
   current Microsoft-documented bootstrap pattern (not the older `new HostBuilder()...Build()`
   style still shown in some third-party blog posts, which still works but is being superseded) -
@@ -1555,6 +1561,110 @@ detail the `JsonException` catch clause was designed to surface -
 `ReadFromJsonAsync<T>()` does throw `System.Text.Json.JsonException` directly for this case, the
 last genuinely open assumption in this whole section. Nothing about this API surface remains
 unverified.
+
+## Migrating to .NET 10
+
+Prompted by a real, time-bound fact, not a routine bump: .NET 8 reaches end of support on
+November 10, 2026 (confirmed via web search before touching anything - .NET 8 and .NET 9 both
+retire the same day; .NET 10 is the new LTS, supported through November 2028). The whole
+solution - all seven projects (`Cdsi.Core`, `Cdsi.Contracts`, `Cdsi.Api`, `Cdsi.Functions`,
+`Cdsi.Demo`, and both test projects) - moved from `net8.0` to `net10.0` together, not just
+`Cdsi.Functions`, since every project already targeted the same framework uniformly and letting
+that drift would mean a `net10.0` project referencing `net8.0` ones for no real reason.
+
+### Azure Functions .NET 10 support, checked properly rather than assumed
+
+Confirmed via web search before writing anything: Azure Functions .NET 10 support went GA at
+Ignite 2025, isolated worker model only (matches this project's own architecture already -
+no design change needed), across all hosting plans except Linux Consumption. Package versions
+(`Microsoft.Azure.Functions.Worker` 2.52.0, `.Worker.Extensions.Http.AspNetCore` 2.1.1,
+`.Worker.Sdk` 2.0.7) were each verified against real, current NuGet listings individually, not
+assumed to move together as a single "latest" bump - the original `2.0.0` baseline this project
+started with was too old for confirmed .NET 10 compatibility across the family.
+
+**Worth knowing before you actually deploy, not discovered by surprise later**: this search also
+surfaced two real, currently-open GitHub issues describing .NET 10 isolated-worker deployment
+problems on Azure specifically - not local build failures, but the worker process crashing after
+a successful deploy (`azure-functions-dotnet-worker` issues #3424, a CI-built worker exiting
+immediately on Windows via Azure DevOps while a Visual Studio-published build of the identical
+code works, and #3351, a Flex Consumption deployment failing at startup with `dotnet exited with
+code 150`). Microsoft's own GA announcement doesn't mention either. Neither has been hit by this
+project - `Cdsi.Functions` has only been run locally via `func start`, not actually deployed to
+Azure yet - but they're real, open, and worth checking against before assuming the deployment
+step ahead will be uneventful just because .NET 10 support is officially GA.
+
+### A real compile break this migration would have shipped without checking
+
+`Swashbuckle.AspNetCore` needed a full major-version jump, not the routine patch bump every other
+package here got. `6.6.2` (this project's original, deliberately-chosen pin) doesn't support
+.NET 10 at all - .NET 10's native OpenAPI generation moved to `Microsoft.OpenApi` v2.x, and
+Swashbuckle versions before its own `10.x` line are tied to `Microsoft.OpenApi` v1.x. Bumping to
+the confirmed-current `10.2.3` was necessary, but checking Swashbuckle's own official v10
+migration guide (rather than assuming a version bump alone would be sufficient) surfaced a real,
+concrete break: `Microsoft.OpenApi.Models`, the namespace `Program.cs`'s own
+`options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo { ... })` call used, no longer
+exists in `Microsoft.OpenApi` v2.x at all - it moved to `Microsoft.OpenApi` directly. Without
+this fix, `Cdsi.Api` would not have compiled after the version bump, even though the `.csproj`
+change alone looked complete. Fixed by updating the one call site to
+`Microsoft.OpenApi.OpenApiInfo`. Also confirmed, while reading that same migration guide: this
+project's decision (a few rounds back) to remove `.WithOpenApi()` calls for an unrelated reason
+turns out to have also been necessary for Swashbuckle 10.x compatibility - the guide states that
+combination "is no longer supported" - a real, independent confirmation that earlier fix holds up
+under this migration too.
+
+Worth a real design question on its own, separate from this migration and not acted on here
+without being asked: Microsoft has been steering the ecosystem toward its own native
+`Microsoft.AspNetCore.OpenApi` package since .NET 9, and multiple sources describe Swashbuckle as
+the path of more friction going forward. Swashbuckle was kept here since switching OpenAPI
+libraries entirely is a genuinely separate decision from "update the target framework," not
+something to bundle into this change without being asked.
+
+### Confirmed: the whole solution builds clean on .NET 10, and all 327 tests pass
+
+`dotnet build` from the repo root has been run for real: all eight build outputs across the
+whole solution (`Cdsi.Core`, `Cdsi.Contracts`, `Cdsi.Demo`, `Cdsi.Core.Tests`, `Cdsi.Api`,
+`Cdsi.Api.Tests`, and `Cdsi.Functions`, plus its auto-generated `WorkerExtensions` sub-project)
+succeeded, 0 errors. This confirms the two riskiest changes in this whole migration held up: the
+`Swashbuckle.AspNetCore` 10.2.3 bump and its `Microsoft.OpenApi.OpenApiInfo` namespace fix
+compiled correctly, and the Azure Functions Worker package bumps (`2.52.0`/`2.0.7`/`2.1.1`)
+resolved and built cleanly. Diligence turned into proof.
+
+`dotnet test` then confirmed the same: **327 total, 0 failed, 327 succeeded** - the identical
+count from every .NET 8 run before this migration, on `net10.0` this time. The real HTTP
+integration tests show the exact same correct behavior as before: `200` for valid requests,
+clean `400`s for both the missing-`dateOfBirth` case and the invalid-gender case. One small,
+harmless thing worth noting: `System.Text.Json`'s own exception message wording changed slightly
+between .NET 8 and .NET 10 (`"was missing required properties, including the following:
+dateOfBirth"` became `"was missing required properties including: 'dateOfBirth'."`) - a runtime
+implementation detail, not a regression; this project's exception handling checks status codes,
+not exact framework message text, so it's unaffected either way.
+
+One artifact worth knowing about rather than mistaking for an inconsistency: the build output
+shows `WorkerExtensions net8.0 succeeded` even though `Cdsi.Functions` itself targets `net10.0`.
+This is the Functions SDK's own auto-generated extension-bundle metadata sub-project, managed by
+its tooling independently of the parent project's target framework - the identical artifact
+appeared in earlier `net8.0` builds too. Not something to act on.
+
+`Cdsi.Functions`'s host startup is now reconfirmed too: `func start --dotnet-isolated` on
+`net10.0` produced the identical pattern seen pre-migration - clean build, the same
+`AzureWebJobsStorage` "Unhealthy" warning already known not to block real requests, and both
+functions registering at the exact same real routes:
+
+```
+GenerateForecast: [POST] http://localhost:7071/api/v1/forecast
+Health: [GET] http://localhost:7071/health
+```
+
+**Fully confirmed**: both endpoints hit for real on `net10.0`, with a result stronger than
+"no errors" - the `POST /api/v1/forecast` response for the identical test request is
+*byte-for-byte identical* to the pre-migration `.NET 8` output. Every field matches: RSV's
+"exceeded the maximum age" finding, Zoster's 50-year gate, Pneumococcal as the one antigen with
+populated `recommendedVaccineCvxCodes`, all of it. The .NET 10 migration didn't just avoid
+breaking anything - it reproduced identical behavior for the same input.
+
+**The `.NET 8` → `.NET 10` migration is now fully closed out.** Every piece of this project -
+the core engine, both API surfaces, and the framework migration itself - has been confirmed
+against real execution, success and failure paths alike, with nothing left unverified.
 
 ## Next steps
 
