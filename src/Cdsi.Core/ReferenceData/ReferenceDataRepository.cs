@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 namespace Cdsi.Core.ReferenceData;
 
 /// <summary>Convenience loader: reads every AntigenSupportingData-*.xml in a directory plus the Schedule file, and holds the combined in-memory catalog. This is the object your API's startup/DI wiring should build once (per your "easy updates" priority: rebuilding this from a mounted data volume, not a code change, is how a new CDC data drop gets picked up).</summary>

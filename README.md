@@ -6,6 +6,30 @@ EHR integration — top priority is easy updates when CDC schedule/logic changes
 supporting data (30 antigen XML files + the Schedule file) is treated as external, hot-swappable
 data, not compiled into the application.
 
+## License
+
+Licensed under the Mozilla Public License 2.0 (MPL-2.0) — see the [LICENSE](LICENSE) file for
+the full text and copyright notice. Every `.cs` file carries the standard MPL 2.0 file-level
+notice as its first lines:
+
+```
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+```
+
+**Any new source file added to this project must carry this same header** as its first lines,
+before any `using` statements or namespace declaration.
+
+**This license covers this project's own source code only — `src/` and `tests/`.** The `data/`
+directory (all 30 antigen XML files, the Schedule XML file, and both XSDs) is the CDC's own
+published CDSi Logic Specification supporting data. It is not authored by this project, carries
+no MPL notice, and is explicitly excluded from the MPL 2.0 license above — see
+[`data/NOTICE`](data/NOTICE) for its own provenance and status. Works of the U.S. federal
+government are generally not subject to copyright protection domestically under 17 U.S.C. § 105,
+but this is general information, not legal advice — confirm the data's actual usage terms with
+the CDC or your own counsel before relying on that for any specific distribution.
+
 ## ✅ Build verified
 
 `dotnet build` and `dotnet test` have been run against this code (not just written blind) —

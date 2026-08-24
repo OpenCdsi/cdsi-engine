@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 namespace Cdsi.Core.Evaluation;
 
 /// <summary>The six calculated dates that make up a "patient series forecast" (§7.5, Tables 7-12/7-13).</summary>

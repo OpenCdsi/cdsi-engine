@@ -1,0 +1,20 @@
+NOTICE — Scope of this project's license
+
+The contents of this directory (all AntigenSupportingData-*.xml files, the
+ScheduleSupportingData.xml file, and both .xsd schema files) are the Centers
+for Disease Control and Prevention's (CDC) own published supporting data for
+the CDSi (Clinical Decision Support for Immunization) Logic Specification.
+
+This data was NOT authored by this project and is explicitly excluded from
+the Mozilla Public License 2.0 that covers this project's own source code
+(see the LICENSE file at the repository root). No MPL notice applies to any
+file in this directory, and none should be added to these files.
+
+Works of the United States federal government are generally not subject to
+copyright protection within the United States under 17 U.S.C. § 105. This
+statement is provided for general information only and is not legal advice;
+confirm the data's actual usage terms directly with the CDC, or with your
+own counsel, before relying on it for any specific distribution or use.
+
+For the current, authoritative version of this data, consult the CDC's own
+CDSi publication channels rather than this repository.

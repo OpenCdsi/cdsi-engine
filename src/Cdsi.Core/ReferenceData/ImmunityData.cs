@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 namespace Cdsi.Core.ReferenceData;
 
 /// <summary>§7.2 Determine Evidence of Immunity (Table 7-2/7-3). The &lt;immunity&gt; element is a sibling of &lt;series&gt; at the root of an antigen supporting-data file - one per antigen, not per series/dose.</summary>

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 namespace Cdsi.Core.Evaluation;
 
 /// <summary>§9.1: is a vaccine group single-antigen or multiple-antigen (VACCINEGROUP-1/2)?</summary>
