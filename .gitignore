@@ -23,6 +23,7 @@ bld/
 [Ll]og/
 [Ll]ogs/
 [Dd]ocs/
+*.zip
 
 # .NET Core
 project.lock.json
@@ -56,3 +57,5 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+.DS_Store
