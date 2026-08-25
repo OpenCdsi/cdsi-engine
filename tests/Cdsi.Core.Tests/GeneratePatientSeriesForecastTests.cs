@@ -333,4 +333,55 @@ public class GeneratePatientSeriesForecastTests
         Assert.True(forecast.ShouldForecast);
         Assert.False(forecast.IsPriorityForecast);
     }
+
+    [Fact]
+    public void RealHibSeries_LateDose2_MakesDose3ForecastInvalid_RetriesAndReturnsDose4()
+    {
+        // §7.6 Validate Recommendation, the spec's own worked example pattern (a catch-up dose
+        // forecast that becomes stale by the time its own earliest date arrives), reconstructed
+        // against real "Hib start at 2 months 4-dose series" data - not the spec's own narrative
+        // example verbatim (that one has some genuine ambiguity about which exact series/dose
+        // pairing it refers to), but a scenario hand-traced precisely against this series' own
+        // real numbers before writing any assertion.
+        //
+        // Dose 1 given early (age 8 weeks). Dose 2 given deliberately LATE (age ~11.5 months) -
+        // still satisfies Dose 2's own requirements (minAge 10 weeks, 4-week minInt from Dose 1),
+        // but pushes Dose 3's own candidateEarliestDate (MAX of its 14-week minAge and its
+        // 4-week minInt from Dose 2) to 2021-01-12 - past Dose 3's real Forecast-context skip
+        // condition ("Age >= 12 months" at DOB 2020-01-01, i.e. on or after 2021-01-01). Dose 3's
+        // own forecast should therefore be invalid, forcing a retry against Dose 4 - which has no
+        // Forecast-context skip condition of its own, and whose "fromPrevious" interval
+        // correctly references the real previous ADMINISTERED dose (Dose 2, since Dose 3 was
+        // never actually given, only forecasted and rejected).
+        var hibSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Hib-508.xml"))
+            .Single(s => s.SeriesName == "Hib start at 2 months 4-dose series");
+
+        var dob = new DateOnly(2020, 1, 1);
+        var patient = MakePatient(dob);
+        var emptyImmunity = new AntigenImmunityData { ClinicalHistoryGuidelines = Array.Empty<ImmunityClinicalHistoryGuideline>(), BirthDateRules = Array.Empty<ImmunityBirthDateRule>() };
+        var emptyContraindications = new AntigenContraindicationData { AntigenLevel = Array.Empty<AntigenContraindication>(), VaccineLevel = Array.Empty<VaccineContraindication>() };
+
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "48", DateAdministered = new DateOnly(2020, 2, 26) },
+            new VaccineDoseAdministered { DoseId = "d2", Cvx = "48", DateAdministered = new DateOnly(2020, 12, 15) }
+        };
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, doses, Schedule.CvxToAntigen);
+        var hibRecords = antigenRecords.Where(r => r.Antigen == "Hib").OrderBy(r => r.DateAdministered).ToArray();
+
+        var seriesHistory = EvaluateSeriesHistory.Execute(
+            patient, hibSeries, hibRecords, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        Assert.Equal(3, seriesHistory.CurrentTargetDoseNumber); // sanity check: Dose 1+2 satisfied, Dose 3 is what evaluation says comes next
+
+        var forecast = GeneratePatientSeriesForecast.Execute(
+            patient, hibSeries, seriesHistory, assessmentDate: new DateOnly(2020, 12, 20),
+            emptyImmunity, emptyContraindications,
+            Array.Empty<PriorVaccineDoseAdministered>(), Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        Assert.True(forecast.ShouldForecast);
+        Assert.Equal(true, forecast.IsValidRecommendation); // Dose 3's own attempt would have been invalid - this must reflect Dose 4's, which is valid
+        Assert.Equal(new DateOnly(2021, 2, 9), forecast.Dates!.EarliestDate); // Dose 4's own interval math (Dose 2 + 8 weeks), not Dose 3's (which would have been 2021-01-12)
+    }
 }

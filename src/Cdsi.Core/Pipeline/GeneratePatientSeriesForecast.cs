@@ -68,10 +68,64 @@ public static class GeneratePatientSeriesForecast
         var hasNotSatisfiedTargetDose = !seriesHistory.SeriesComplete;
         var hasSatisfiedTargetDose = seriesHistory.AllEvaluatedDoses.Any(d => d.SatisfiedTargetDoseNumber is not null);
 
-        var currentTargetDose = seriesHistory.CurrentTargetDoseNumber is int doseNumber
-            ? series.SeriesDoses.SingleOrDefault(d => d.DoseNumber == doseNumber)
-            : null;
+        // §7.6 Validate Recommendation: "the forecasted dates are beyond the conditional skip
+        // requirements of the target dose being forecasted... To prevent erroneous
+        // recommendations, this section prospectively ensures the recommendation remains valid
+        // at the earliest date. If the recommendation is found to be invalid, re-forecasting for
+        // the next target dose is required." Previously, IsValidRecommendation was computed and
+        // attached to the result but never actually ACTED on - a real, confirmed gap (found by
+        // re-reading this section's own text carefully, not a guess) fixed here: on an invalid
+        // forecast, retry against the next target dose in the series, repeating until a valid
+        // forecast is found or the series' target doses are exhausted (in which case the spec
+        // doesn't say what happens next - returning the last, still-invalid attempt rather than
+        // silently picking an earlier one or crashing is a documented, reasonable fallback for
+        // that edge case).
+        var candidateDoseNumber = seriesHistory.CurrentTargetDoseNumber;
+        while (true)
+        {
+            var currentTargetDose = candidateDoseNumber is int doseNumber
+                ? series.SeriesDoses.SingleOrDefault(d => d.DoseNumber == doseNumber)
+                : null;
 
+            var attempt = ComputeForecastForTargetDose(
+                patient, series, seriesHistory, assessmentDate, immunityData, contraindicationData,
+                priorDosesAllAntigens, conflictsByImpactedCvx, resolveCompletedSeries,
+                currentTargetDose, hasNotSatisfiedTargetDose, hasSatisfiedTargetDose);
+
+            if (!attempt.ShouldForecast || attempt.IsValidRecommendation != false)
+            {
+                return attempt;
+            }
+
+            var nextDoseNumber = series.SeriesDoses
+                .Where(d => d.DoseNumber > currentTargetDose!.DoseNumber)
+                .Select(d => (int?)d.DoseNumber)
+                .OrderBy(n => n)
+                .FirstOrDefault();
+
+            if (nextDoseNumber is null)
+            {
+                return attempt;
+            }
+
+            candidateDoseNumber = nextDoseNumber;
+        }
+    }
+
+    private static PatientSeriesForecastResult ComputeForecastForTargetDose(
+        Patient patient,
+        AntigenSeries series,
+        SeriesHistoryResult seriesHistory,
+        DateOnly assessmentDate,
+        AntigenImmunityData immunityData,
+        AntigenContraindicationData contraindicationData,
+        IReadOnlyList<PriorVaccineDoseAdministered> priorDosesAllAntigens,
+        IReadOnlyDictionary<string, IReadOnlyList<VaccineConflictRule>> conflictsByImpactedCvx,
+        Func<string?, bool> resolveCompletedSeries,
+        SeriesDose? currentTargetDose,
+        bool hasNotSatisfiedTargetDose,
+        bool hasSatisfiedTargetDose)
+    {
         // Contraindication/immunity/age only meaningfully apply when there's a next target dose
         // to evaluate them against - a Complete series (no current target dose) has nothing to
         // check them against, and DetermineForecastNeed's own cascade already resolves such a
