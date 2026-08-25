@@ -9,6 +9,34 @@ using Cdsi.Core.ReferenceData;
 namespace Cdsi.Core.Pipeline;
 
 /// <summary>
+/// Everything GeneratePatientForecast.Execute produces, plus per-dose evaluation detail for the
+/// winning series per antigen - added for Cdsi.Conformance.Tests, which needs to check
+/// individual administered-dose outcomes (Valid/NotValid/Reason per §6, not just the merged
+/// §9 vaccine-group-level forecast). The original Execute(...) overload below is unchanged and
+/// still returns just VaccineGroupForecasts - every existing caller (Cdsi.Api, Cdsi.Functions,
+/// Cdsi.Demo) that doesn't need per-dose detail is unaffected.
+/// </summary>
+public sealed class PatientForecastResult
+{
+    public required IReadOnlyList<VaccineGroupForecastResult> VaccineGroupForecasts { get; init; }
+
+    /// <summary>
+    /// Keyed by antigen name (matches AntigenSeries.Antigen) - the WINNING (§8-selected best)
+    /// patient series' own dose-by-dose evaluation detail. An antigen with no relevant series at
+    /// all simply has no entry here.
+    ///
+    /// SIMPLIFICATION, flagged: §8.8 can legitimately select more than one "best" series for the
+    /// same antigen at once (a real, documented scenario elsewhere in this project - e.g. two
+    /// equivalent HepB series groups both independently Complete). This dictionary holds only
+    /// one SeriesHistoryResult per antigen, so in that rare case whichever series is processed
+    /// last wins - a real, deliberate simplification for a genuinely rare edge case, not an
+    /// oversight, matching how other multi-winner scenarios have been handled elsewhere in this
+    /// project (see EvaluatePatientSeriesHistory's own "only contribute once per antigen" note).
+    /// </summary>
+    public required IReadOnlyDictionary<string, SeriesHistoryResult> DoseDetailsByAntigen { get; init; }
+}
+
+/// <summary>
 /// The complete, end-to-end pipeline: raw administered doses in, merged vaccine group forecasts
 /// out. Wires together everything this project has built - §4.2/§5.1 (organize history, find
 /// relevant series), §4.4/§6 (evaluate immunization history per series, via
@@ -35,7 +63,22 @@ namespace Cdsi.Core.Pipeline;
 /// </summary>
 public static class GeneratePatientForecast
 {
+    /// <summary>The original, stable public entry point - unchanged. Still just merged vaccine group forecasts, for callers that don't need per-dose detail.</summary>
     public static IReadOnlyList<VaccineGroupForecastResult> Execute(
+        Patient patient,
+        IReadOnlyList<VaccineDoseAdministered> administeredDoses,
+        IReadOnlyList<AntigenSeries> allSeries,
+        ScheduleSupportingData schedule,
+        IReadOnlyList<VaccineGroupInfo> vaccineGroups,
+        IReadOnlyDictionary<string, AntigenImmunityData> immunityByAntigen,
+        IReadOnlyDictionary<string, AntigenContraindicationData> contraindicationsByAntigen,
+        DateOnly assessmentDate) =>
+        ExecuteWithDoseDetail(
+            patient, administeredDoses, allSeries, schedule, vaccineGroups,
+            immunityByAntigen, contraindicationsByAntigen, assessmentDate).VaccineGroupForecasts;
+
+    /// <summary>Same computation as Execute, plus per-antigen dose-by-dose detail for the winning series - see PatientForecastResult.</summary>
+    public static PatientForecastResult ExecuteWithDoseDetail(
         Patient patient,
         IReadOnlyList<VaccineDoseAdministered> administeredDoses,
         IReadOnlyList<AntigenSeries> allSeries,
@@ -107,16 +150,25 @@ public static class GeneratePatientForecast
         // §8: best patient series per antigen (across that antigen's own series groups), paired
         // with the forecast already computed for it above.
         var bestSeriesByVaccineGroup = new Dictionary<string, List<(AntigenSeries Series, PatientSeriesForecastResult Forecast)>>();
+        var doseDetailsByAntigen = new Dictionary<string, SeriesHistoryResult>();
         foreach (var members in membersByAntigen.Values)
         {
             var bestSeries = DetermineBestPatientSeriesForAntigen.Execute(members, patient.DateOfBirth, assessmentDate);
             foreach (var series in bestSeries)
             {
+                var member = members.First(m => m.Series == series);
+
+                // Recorded regardless of whether this antigen belongs to a vaccine group - a
+                // conformance check on an individual dose's Valid/NotValid outcome doesn't
+                // depend on §9 merge eligibility. See PatientForecastResult's own doc comment
+                // for the (rare, documented) multi-winner-per-antigen simplification this
+                // last-write-wins assignment represents.
+                doseDetailsByAntigen[series.Antigen] = member.SeriesHistory;
+
                 if (series.VaccineGroup is null)
                 {
                     continue; // no vaccine group classifies this antigen - nothing to merge into
                 }
-                var member = members.First(m => m.Series == series);
                 if (!bestSeriesByVaccineGroup.TryGetValue(series.VaccineGroup, out var list))
                 {
                     list = new List<(AntigenSeries, PatientSeriesForecastResult)>();
@@ -149,6 +201,10 @@ public static class GeneratePatientForecast
                 anyContainedIsPriorityForecast, latestAdministeredDateOfGroupVaccineTypes));
         }
 
-        return results;
+        return new PatientForecastResult
+        {
+            VaccineGroupForecasts = results,
+            DoseDetailsByAntigen = doseDetailsByAntigen
+        };
     }
 }
