@@ -44,13 +44,15 @@ namespace Cdsi.Core.Pipeline;
 /// </summary>
 public static class EvaluatePatientSeriesHistory
 {
+    /// <param name="assessmentDate">Opt-in, threaded straight through to EvaluateSeriesHistory's own same-named parameter - see its class doc comment. Null (the default) preserves the exact prior behavior.</param>
     public static IReadOnlyDictionary<AntigenSeries, SeriesHistoryResult> Execute(
         Patient patient,
         IReadOnlyList<AntigenSeries> relevantSeries,
         IReadOnlyList<VaccineDoseAdministered> allDosesAdministered,
         IReadOnlyDictionary<string, CvxMapEntry> cvxToAntigen,
         IReadOnlyDictionary<string, IReadOnlyList<VaccineConflictRule>> conflictsByImpactedCvx,
-        Func<string, string?, bool> resolveCompletedSeries)
+        Func<string, string?, bool> resolveCompletedSeries,
+        DateOnly? assessmentDate = null)
     {
         var antigenRecords = OrganizeImmunizationHistory.Execute(patient, allDosesAdministered, cvxToAntigen);
 
@@ -76,7 +78,7 @@ public static class EvaluatePatientSeriesHistory
 
             var seriesResult = EvaluateSeriesHistory.Execute(
                 patient, series, thisAntigenRecords, otherAntigensHistory,
-                conflictsByImpactedCvx, groups => resolveCompletedSeries(series.Antigen, groups));
+                conflictsByImpactedCvx, groups => resolveCompletedSeries(series.Antigen, groups), assessmentDate);
 
             results[series] = seriesResult;
 

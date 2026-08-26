@@ -276,9 +276,21 @@ public static class GeneratePatientSeriesForecast
     private static Func<IntervalReferenceType, int?, IReadOnlyList<string>, DateOnly?> BuildIntervalReferenceResolver(SeriesHistoryResult seriesHistory)
     {
         var priorThisAntigen = seriesHistory.AllEvaluatedDoses;
-        var targetDoseSatisfiedDates = priorThisAntigen
-            .Where(d => d.SatisfiedTargetDoseNumber is not null)
-            .ToDictionary(d => d.SatisfiedTargetDoseNumber!.Value, d => d.DateAdministered);
+
+        // A recurring target dose (§4.4 step 5/6 - see EvaluateSeriesHistory's own class doc
+        // comment) can be satisfied more than once, by design: the SAME target dose number gets
+        // satisfied again on each subsequent administered record (annual COVID boosters, Td
+        // decade boosters). ToDictionary would throw on that second satisfaction - a genuine,
+        // pre-existing crash surfaced by real multi-season COVID-19 conformance cases, not
+        // something introduced here. Fixed to keep the LATEST satisfaction date per target dose
+        // number, exactly mirroring EvaluateSeriesHistory's own dictionary-building pattern
+        // (`targetDoseSatisfiedDates[targetDose.DoseNumber] = adminRecord.DateAdministered`,
+        // which naturally overwrites on each new satisfaction rather than throwing).
+        var targetDoseSatisfiedDates = new Dictionary<int, DateOnly>();
+        foreach (var d in priorThisAntigen.Where(d => d.SatisfiedTargetDoseNumber is not null).OrderBy(d => d.DateAdministered))
+        {
+            targetDoseSatisfiedDates[d.SatisfiedTargetDoseNumber!.Value] = d.DateAdministered;
+        }
 
         return (type, targetDoseNumber, cvxCodes) => type switch
         {

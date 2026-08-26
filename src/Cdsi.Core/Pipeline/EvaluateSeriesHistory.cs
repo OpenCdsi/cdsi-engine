@@ -50,18 +50,60 @@ public sealed class SeriesHistoryResult
 /// not "this dose satisfied it." This applies even to a recurring dose that gets Skipped - the
 /// spec's own step 5 text only triggers recurrence checking after step 4a (Satisfied), so a
 /// Skipped recurring dose is treated the same as any other Skipped dose (advance, don't clone).
+///
+/// A SECOND, REAL GAP FOUND AND FIXED - not spec text this time, but the real CDC supporting data
+/// itself: the §4.4 algorithm's own literal text ("if the antigen administered collection is
+/// empty, the evaluation process... ends") means Conditional Skip (§6.2) can only ever be
+/// evaluated from WITHIN this loop, since Table 6-6's decision only runs when there's an
+/// administered record to evaluate a target dose against. But the real Pertussis/Diphtheria/
+/// Tetanus data has standalone, dose-count-independent Evaluation-context Age conditions on
+/// Doses 1-6 (confirmed by reading the real XML directly, `<set>`-by-`<set>`, after an earlier,
+/// less careful reading wrongly merged two separate OR'd sets into one AND'd condition) - Doses
+/// 1-3/5 skip at Age >= 7 years, Dose 4 at Age >= 4 years, Dose 6 unconditionally at Age >= 7
+/// years too. Dose 7's own age window (`minAge: 7 years`, confirmed identical on both the
+/// standard and "start at 12 months" series) is exactly the age-anchored recommendation a real
+/// catch-up patient needs - but a genuinely zero-dose (or partially-vaccinated-then-exhausted)
+/// patient's `CurrentTargetDoseNumber` could never reach it, since the loop above only advances
+/// the pointer in step with an administered record actually being consumed.
+///
+/// Fixed with a second pass, opt-in via the new `assessmentDate` parameter (defaulting to null,
+/// so every existing caller that doesn't pass one keeps the exact prior behavior - this project's
+/// established additive-change pattern, same as `GeneratePatientForecast.ExecuteWithDoseDetail`):
+/// after the main loop settles, wherever it landed, keep advancing past any remaining target
+/// dose whose Evaluation-context Conditional Skip is satisfied using the patient's CURRENT age
+/// (the assessment date as reference, since there's no administered dose to anchor to - the
+/// closest real analogue to "if this patient walked in today, would this target dose even apply
+/// to them"). This handles the zero-dose case AND the "ran out of administered records partway
+/// through a still-skippable stretch" case the same way, since both share the identical
+/// structural gap.
+///
+/// A THIRD GAP was investigated (real conformance cases 2020-0004/2020-0005: adult patients
+/// starting/continuing DTaP/Tdap/Td catch-up with exactly one prior valid dose, still forecasting
+/// "today" instead of the corpus's expected date) and an explicit Dose-7 "auto-satisfy" ASSUMPTION
+/// was implemented, then REVERTED after real dotnet test execution disproved the trace it was
+/// built on: the main loop's OWN pre-existing per-dose Age skip (documented in the second gap
+/// above) already advances a single adult-administered dose straight through Doses 1-6 to Dose 7
+/// without any fast-forward pass involved at all, so the auto-satisfy logic never even applied to
+/// the cases it was designed for - and its presence correlated with a net increase in conformance
+/// failures elsewhere (255 -> 262) that wasn't confirmed safe. 2020-0004/2020-0005 remain
+/// genuinely unresolved; the real explanation is now believed to live in how Diphtheria or
+/// Tetanus behave differently from Pertussis for the same dose, or in the multi-antigen merge -
+/// not in anything this class does per-antigen. Flagged here rather than silently dropped, so a
+/// future attempt at this doesn't have to rediscover the same dead end.
 /// </summary>
 public static class EvaluateSeriesHistory
 {
     /// <param name="antigenAdministeredRecords">This antigen's own records only, ascending date order (as produced by OrganizeImmunizationHistory).</param>
     /// <param name="priorEvaluatedDosesFromOtherAntigens">Patient-wide history already evaluated from OTHER antigens/series, needed only for cross-antigen Vaccine Conflict (§6.7). Pass empty if evaluating in isolation.</param>
+    /// <param name="assessmentDate">Opt-in: when supplied, an additional pass after the main loop advances past any remaining target dose whose Evaluation-context Conditional Skip is satisfied using the patient's current age at this date - see the class doc comment's second gap. Null (the default) preserves the exact prior behavior for callers that don't need this.</param>
     public static SeriesHistoryResult Execute(
         Patient patient,
         AntigenSeries series,
         IReadOnlyList<AntigenAdministered> antigenAdministeredRecords,
         IReadOnlyList<EvaluatedAntigenDose> priorEvaluatedDosesFromOtherAntigens,
         IReadOnlyDictionary<string, IReadOnlyList<VaccineConflictRule>> conflictsByImpactedCvx,
-        Func<string?, bool> resolveCompletedSeries)
+        Func<string?, bool> resolveCompletedSeries,
+        DateOnly? assessmentDate = null)
     {
         var targetDoses = series.SeriesDoses.OrderBy(d => d.DoseNumber).ToArray();
         var evaluatedThisAntigen = new List<EvaluatedAntigenDose>();
@@ -124,6 +166,29 @@ public static class EvaluateSeriesHistory
                 var extraneousResult = TargetDoseEvaluationResult.NotSatisfied(EvaluationStatus.Extraneous, "Series already complete");
                 doseResults.Add(new DoseEvaluationRecord(record, null, extraneousResult));
                 evaluatedThisAntigen.Add(new EvaluatedAntigenDose(record.Antigen, record.Cvx, record.DateAdministered, EvaluationStatus.Extraneous, null));
+            }
+        }
+
+        // Second pass - see class doc comment's "second gap": fast-forward past any remaining
+        // target dose whose Evaluation-context Conditional Skip is satisfied given the patient's
+        // CURRENT age, wherever the main loop above left off (targetIdx 0 for a genuinely
+        // zero-dose patient, or wherever administered records ran out for anyone else). No
+        // DoseEvaluationRecord is added for a fast-forwarded dose - nothing was administered to
+        // record an outcome for; only CurrentTargetDoseNumber below reflects the new position.
+        if (assessmentDate is DateOnly today)
+        {
+            var priorForSkip = evaluatedThisAntigen.Select(EvaluateDoseAgainstTargetDose.MapToPriorDoseForSkipOrConflict).ToArray();
+            while (targetIdx < targetDoses.Length)
+            {
+                var candidateDose = targetDoses[targetIdx];
+                var canSkip = EvaluateConditionalSkip.CanBeSkipped(
+                    patient.DateOfBirth, today, ConditionalSkipContext.Evaluation,
+                    candidateDose.ConditionalSkipInstances, priorForSkip, resolveCompletedSeries);
+                if (!canSkip)
+                {
+                    break;
+                }
+                targetIdx++;
             }
         }
 

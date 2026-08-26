@@ -96,14 +96,14 @@ public static class GeneratePatientForecast
         // condition needs this before it can be resolved for real.
         var firstPassHistory = EvaluatePatientSeriesHistory.Execute(
             patient, relevantSeries, administeredDoses, schedule.CvxToAntigen, schedule.ConflictsByImpactedCvx,
-            resolveCompletedSeries: (_, _) => false);
+            resolveCompletedSeries: (_, _) => false, assessmentDate);
         var resolveCompletedSeries = ResolveCompletedSeriesGroups.Build(firstPassHistory);
 
         // Pass 2 (authoritative): §4.2/§4.4/§6, now with the real Completed Series resolver,
         // plus the real cross-antigen vaccine conflict resolution EvaluatePatientSeriesHistory
         // already wires in.
         var historyBySeries = EvaluatePatientSeriesHistory.Execute(
-            patient, relevantSeries, administeredDoses, schedule.CvxToAntigen, schedule.ConflictsByImpactedCvx, resolveCompletedSeries);
+            patient, relevantSeries, administeredDoses, schedule.CvxToAntigen, schedule.ConflictsByImpactedCvx, resolveCompletedSeries, assessmentDate);
 
         // Patient-wide evaluated-dose history, one antigen's worth per antigen (matching
         // EvaluatePatientSeriesHistory's own "only contribute once per antigen" simplification -

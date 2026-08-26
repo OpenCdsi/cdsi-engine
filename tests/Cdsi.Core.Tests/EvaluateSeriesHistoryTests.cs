@@ -224,4 +224,93 @@ public class EvaluateSeriesHistoryTests
         Assert.True(result.SeriesComplete);
         Assert.Null(result.CurrentTargetDoseNumber);
     }
+
+    [Fact]
+    public void RealPertussisStandardSeries_ZeroDoses_SevenYearOld_FastForwardsToDose7NotDose1()
+    {
+        // The core scenario behind the whole DTaP/Tdap/Td catch-up investigation, reconstructed
+        // directly against real Pertussis standard series data: a patient with ZERO administered
+        // doses, reaching age 7 exactly. Without assessmentDate supplied (the opt-in), the main
+        // loop above never runs at all (there's no administered record to iterate) and
+        // CurrentTargetDoseNumber stays at its structural default, Dose 1 - confirmed, spec-
+        // faithful per §4.4's own literal text, but clinically wrong (Dose 1's own minAge of
+        // 6 weeks anchors a "recommended" date years in the patient's past).
+        //
+        // With assessmentDate supplied, the new second pass should fast-forward through Doses
+        // 1-6 (each of whose real, standalone Evaluation-context Age conditions - confirmed by
+        // reading the actual XML `<set>`-by-`<set>`, not assumed - are satisfied by a 7-year-old:
+        // Doses 1/2/3/5 skip at Age >= 7 years, Dose 4 at Age >= 4 years, Dose 6 unconditionally
+        // at Age >= 7 years), landing on Dose 7 - whose own skip conditions require actual prior
+        // valid doses (none apply to a zero-dose patient) and whose own age window (minAge:
+        // 7 years, confirmed identical on this series and the "start at 12 months" alternate) is
+        // exactly the real, intended, age-anchored recommendation.
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+            .Single(s => s.SeriesName == "Pertussis standard series");
+
+        var dob = new DateOnly(2019, 1, 1);
+        var patient = MakePatient(dob);
+        var assessmentDate = new DateOnly(2026, 1, 1); // exactly 7 years old
+
+        var withoutFix = EvaluateSeriesHistory.Execute(
+            patient, pertussisSeries, Array.Empty<AntigenAdministered>(), Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+        Assert.Equal(1, withoutFix.CurrentTargetDoseNumber); // confirms the structural gap this fix addresses is real
+
+        var withFix = EvaluateSeriesHistory.Execute(
+            patient, pertussisSeries, Array.Empty<AntigenAdministered>(), Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected, assessmentDate);
+        Assert.Equal(7, withFix.CurrentTargetDoseNumber);
+        Assert.Empty(withFix.DoseResults); // no administered records exist to have produced any
+    }
+
+    [Fact]
+    public void RealPertussisStandardSeries_OneValidDoseAsAdult_MainLoopsOwnAgeSkipAlreadyReachesDose8()
+    {
+        // NOT the "third gap" scenario anymore - that auto-satisfy assumption was implemented,
+        // then REVERTED after this exact test's real dotnet test execution disproved the trace
+        // it was built on (see EvaluateSeriesHistory's own class doc comment for the full story).
+        // Kept and renamed because what it actually demonstrates is still real and worth guarding
+        // against regression: an adult patient with exactly one valid prior dose, reconstructed
+        // from real corpus case 2020-0004 (DOB 1995-08-05, one Tdap dose CVX115 given 2026-08-05,
+        // assessment date the same day - the corpus's own expectedStatus for this dose is
+        // 'Valid', already matched by this engine).
+        //
+        // The original hand-trace assumed Dose 1 satisfies this dose directly, leaving
+        // CurrentTargetDoseNumber at Dose 2 after the main loop, needing the fast-forward pass
+        // (and then the now-reverted auto-satisfy) to reach Dose 8. Real execution corrected
+        // this: Dose 1's own Evaluation-context skip condition (Age >= 7 years, standalone - the
+        // same one grounding the "second gap" fix) already fires WITHIN the pre-existing main
+        // loop, using the administered dose's own date as reference. For this adult patient, the
+        // main loop's OWN, unmodified mechanics try this one CVX115 record against Dose 1 (skip),
+        // Dose 2 (skip), ... Dose 6 (skip), landing it on Dose 7, where it genuinely gets
+        // Satisfied - advancing straight to Dose 8 with no fast-forward pass needed at all.
+        //
+        // 2020-0004/2020-0005 themselves remain genuinely unresolved in the full conformance
+        // corpus - this test only confirms that Pertussis in isolation reaches the right target
+        // dose; the real explanation is now believed to live in Diphtheria/Tetanus behaving
+        // differently, or in the multi-antigen merge, not in anything this class does.
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+            .Single(s => s.SeriesName == "Pertussis standard series");
+
+        var dob = new DateOnly(1995, 8, 5);
+        var patient = MakePatient(dob);
+        var assessmentDate = new DateOnly(2026, 8, 5);
+
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "115", DateAdministered = new DateOnly(2026, 8, 5) }
+        };
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, doses, Schedule.CvxToAntigen);
+        var pertussisRecords = antigenRecords.Where(r => r.Antigen == "Pertussis").OrderBy(r => r.DateAdministered).ToArray();
+
+        var withoutSecondPass = EvaluateSeriesHistory.Execute(
+            patient, pertussisSeries, pertussisRecords, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+        Assert.Equal(8, withoutSecondPass.CurrentTargetDoseNumber); // the main loop's own age-skip alone already reaches Dose 8
+
+        var withSecondPass = EvaluateSeriesHistory.Execute(
+            patient, pertussisSeries, pertussisRecords, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected, assessmentDate);
+        Assert.Equal(8, withSecondPass.CurrentTargetDoseNumber); // unchanged - the fast-forward pass has nothing left to do here
+    }
 }

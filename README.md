@@ -1666,6 +1666,189 @@ breaking anything - it reproduced identical behavior for the same input.
 the core engine, both API surfaces, and the framework migration itself - has been confirmed
 against real execution, success and failure paths alike, with nothing left unverified.
 
+## `Cdsi.Conformance.Tests` - a real, external 1,064-case corpus
+
+A second, independent kind of verification from everything before it: rather than tests this
+project wrote against its own understanding of the spec, `Cdsi.Conformance.Tests` runs the real
+engine against `cdsi-healthy-test-cases.json` - an external corpus this project didn't author,
+covering 1,064 real patient scenarios across 17 vaccine groups.
+
+### A real, additive engine change first: per-dose detail
+
+The corpus needs to check individual administered-dose outcomes (Valid/NotValid per §6), not
+just the merged vaccine-group-level forecast `GeneratePatientForecast.Execute` already returns.
+Rather than change that method's signature (which every existing caller - `Cdsi.Api`,
+`Cdsi.Functions`, `Cdsi.Demo` - depends on), a new `ExecuteWithDoseDetail` method was added
+alongside it, returning a `PatientForecastResult` that wraps the existing vaccine-group forecasts
+plus `DoseDetailsByAntigen` (the winning series' own dose-by-dose evaluation detail, per antigen).
+`Execute` itself is unchanged - confirmed by checking every one of its 6 existing call sites
+before touching anything.
+
+### The vaccine-group and status vocabulary, verified against real data before use
+
+The corpus uses its own short codes ("DTAP", "ZOSTER") and status text ("Not complete", "Valid")
+that don't match the engine's own vocabulary directly. `VaccineGroupMapping.cs` translates
+between them - built by checking every real `vaccineGroup` value across all 30 antigen files
+first, not just the ~17 the corpus happens to use. Two real things this grounding caught early:
+the engine's own `VaccineGroupName` can carry a trailing space ("Zoster ") that its own XML
+loader deliberately doesn't strip (confirmed by reading `ElementTextOrNull`'s actual source, not
+assumed) - and the same quirk exists on "Cholera " too, found while checking, though irrelevant
+to this particular corpus.
+
+### Two real bugs found and fixed on the first blind run, both in the test's own matching logic
+
+Two categories accounted for 131 of the corpus's initial 431 failures - not engine bugs, but the
+test's own logic for matching a corpus dose to the engine's internal evaluation record:
+
+1. **`EvaluationStatus` null (104 failures)**: null there is correct, deliberate engine behavior
+   (it means the target dose was `Skipped`, never actually evaluated for Valid/NotValid) - but
+   the two-pointer algorithm can try the SAME administered dose against a Skipped target dose
+   before landing on the real one, and a naive `.FirstOrDefault()` grabbed the uninteresting
+   Skipped record instead. Confirmed real and common for DTaP/Tdap/Td specifically by checking
+   Pertussis's own real conditional-skip data (dozens of age-gated conditions). Fixed by
+   preferring a non-Skipped match when one exists.
+2. **No matching record found at all (27 failures)**: some corpus cases deliberately mix doses
+   from a DIFFERENT vaccine group into `immunizationHistory`, specifically to test cross-vaccine
+   interactions (an "MMR" test case including a Varicella dose, to test whether a too-soon
+   MMR-after-Varicella interval invalidates the MMR dose) - confirmed by reading actual failing
+   cases, not assumed. The test's search was wrongly scoped to only the case's own vaccine
+   group's antigens. Fixed by searching every antigen the engine tracked for that patient.
+
+Both fixes independently confirmed at 0 remaining instances on the next run (431 → 372 failures).
+
+### A real, independently-valuable spec gap found and fixed along the way
+
+While investigating the largest remaining failure category (500+ forecast-date mismatches,
+concentrated in DTaP/Tdap/Td), re-reading §7.6 "Validate Recommendation" precisely turned up a
+genuine gap: its own text says "if the recommendation is found to be invalid, re-forecasting for
+the next target dose is required." `Cdsi.Core` computed that validity flag
+(`IsValidRecommendation`) and attached it to the result - but nothing ever acted on it. Fixed by
+extracting the per-target-dose forecast computation into a helper and wrapping it in a loop that
+retries against the next target dose on an invalid forecast, exactly matching the spec's own
+words. A new test, grounded in real Hib data (a late Dose 2 pushing Dose 3's own forecast past
+its real "Age ≥ 12 months" skip condition, correctly forcing a retry onto Dose 4), confirms the
+loop actually works - `Cdsi.Core.Tests` is now 322/322. This fix alone dropped the conformance
+corpus from 372 to 332 failures, genuinely helping cases broader than the one that motivated it.
+
+### The DTaP/Tdap/Td catch-up investigation - found, corrected, and fixed
+
+The single largest remaining failure pattern: a 7-year-old patient with few or zero prior
+DTaP/Tdap/Td doses. The corpus expects `earliestDate` to land at or near the assessment date
+(start catch-up now); the engine computes a date years in the patient's past (anchored to Dose
+1's own `minAge` of 6 weeks). Confirmed via the spec's own literal §4.4 text ("if the antigen
+administered collection is empty, the evaluation process... ends") that this is faithful,
+structural behavior, not an accidental bug: Conditional Skip can only ever fire from within the
+dose-comparison loop, which needs at least one administered dose to run at all - a zero-dose
+patient's `CurrentTargetDoseNumber` can never advance past Dose 1's own initial value.
+
+Two real, external references were brought in rather than guessing further:
+Systematically checking every Forecast-context conditional-skip condition across all 11 doses of
+Diphtheria, Pertussis, and Tetanus's own standard series (not just Dose 1) found a clear
+structure - though the first pass at reading it was wrong in an important way, corrected before
+it went any further. The first query printed conditions without separating which `<set>` each
+belonged to, and read Doses 1-5's `Age ≥ 7 years` and `> 5 total doses` conditions as one AND'd
+requirement. A more careful, `<set>`-aware re-query showed these are two SEPARATE sets (OR'd, per
+the same convention already established elsewhere in this project) - and, more importantly, that
+the **Evaluation**-context skip conditions on Doses 1, 2, 3, and 5 are a single, standalone
+`Age ≥ 7 years` with no dose-count gate at all (Dose 4: `Age ≥ 4 years`, same pattern). The real
+data is designed for age-based skip to work regardless of how many doses the patient has.
+
+That reframes the whole finding. Dose 7 - confirmed on both the standard series and the "start at
+12 months" alternate series - has `minAge: 7 years` (not 6 weeks). For a patient who is exactly 7
+years old, `candidateEarliestDate` anchored to Dose 7 would land exactly at the assessment date -
+precisely what the corpus expects. The full chain is now clear: a real patient's evaluation
+history satisfies or skips through Doses 1-6 as doses are actually administered (Dose 6's own
+Evaluation skip is also standalone, `Age ≥ 7 years`), eventually landing on Dose 7's own
+correctly-anchored age window. The entire remaining gap is structural, not a data-modeling
+question: Conditional Skip can only ever be checked from *within* the two-pointer evaluation
+loop, which requires at least one administered dose to run - so a genuinely zero-dose patient's
+`CurrentTargetDoseNumber` can never advance past Dose 1's own initial value, no matter how clearly
+their age alone would justify skipping ahead through Doses 1-6 first.
+
+**Two real, external references confirmed the intent, without needing to reverse-engineer ICE's
+full Java/Drools codebase**: ICE (`github.com/cdsframework/ice`) is the CDC/AIRA-validated
+open-source reference implementation - large enough that reading its full rule logic wasn't
+pursued as disproportionate to the payoff. FITS (NIST, `fits.nist.gov`) is confirmed to be the
+actual tool used to author and maintain the CDC's CDSi test cases, strongly suggesting this
+corpus is FITS-derived - and its own test categorization metadata, already present in the corpus
+under `meta.forecastTestType`, reads `"Recommended based on age"` for every failing case in this
+pattern. Direct, external confirmation of intent, not a misreading of the symptom.
+
+### The fix, implemented
+
+Given how the two-pointer loop only advances in step with an administered record, the fix adds a
+second pass in `EvaluateSeriesHistory.Execute`: after the main loop settles wherever it landed
+(targetIdx 0 for a genuinely zero-dose patient, or wherever administered records ran out for
+anyone else), keep advancing past any remaining target dose whose Evaluation-context Conditional
+Skip is satisfied using the patient's current age - the assessment date as reference, since
+there's no administered dose to anchor to.
+
+Made additive, not breaking, the same pattern already established for
+`GeneratePatientForecast.ExecuteWithDoseDetail`: `EvaluateSeriesHistory.Execute` gained a new
+`DateOnly? assessmentDate = null` parameter (threaded through `EvaluatePatientSeriesHistory.Execute`
+the same way), defaulting to null so every one of the 23 existing call sites across
+`Cdsi.Core`/`Cdsi.Core.Tests` that don't pass one keeps the exact prior behavior, unchanged.
+`GeneratePatientForecast.cs` - the one real, production call chain - now passes its own real
+`assessmentDate` through both of its `EvaluatePatientSeriesHistory.Execute` calls (the first-pass
+Completed Series discovery and the authoritative second pass), so the fix applies consistently
+wherever it matters for real forecasting.
+
+A new test, grounded directly in real Pertussis standard series data (not a synthetic
+approximation), proves the fix works as designed:
+`RealPertussisStandardSeries_ZeroDoses_SevenYearOld_FastForwardsToDose7NotDose1` constructs a
+zero-dose, exactly-7-year-old patient and asserts `CurrentTargetDoseNumber` is `1` without the
+fix (confirming the structural gap is real) and `7` with it (confirming Doses 1-6's real,
+standalone Age conditions correctly fast-forward the patient to Dose 7's own correctly-anchored
+`minAge: 7 years` window). Confirmed for real: `Cdsi.Core.Tests` went from 321/321 to 322/322 on
+the next real `dotnet test` run, and the conformance corpus dropped from 372 to 332 failures -
+this fix genuinely helped cases well beyond the one that motivated it.
+
+### A second real bug, found along the way and unrelated to the fix above
+
+Running the corpus further (after the fix above) surfaced a second, genuinely pre-existing crash:
+`GeneratePatientSeriesForecast.BuildIntervalReferenceResolver` used `.ToDictionary()` keyed by
+`SatisfiedTargetDoseNumber` - which throws the moment a *recurring* target dose (this project's
+own Recurring Dose feature) is satisfied more than once, since the same target dose number gets
+satisfied again on every subsequent administered record (annual COVID boosters, Td decade
+boosters). Confirmed as pre-existing, not something the fix above introduced - it was simply
+never reached by earlier conformance runs. Fixed by keeping the *latest* satisfaction date per
+target dose number instead of throwing, exactly mirroring `EvaluateSeriesHistory`'s own existing
+dictionary-building pattern. This alone dropped the corpus from 332 to 255 failures on the next
+real run (crossing paths with other fixes landing at the same time).
+
+### A third gap - tried, then reverted after real execution
+
+Tracing two remaining real conformance failures (`2020-0004`/`2020-0005`: adult patients starting
+or continuing DTaP/Tdap/Td catch-up with exactly one prior valid dose) led to a hand-traced
+hypothesis: Dose 7 of the DTaP/Tdap/Td group has real Conditional Skip conditions covering exactly
+2, 3, 4, or >4 prior valid doses (none cover 0 or 1), and its own 0-day interval-from-previous
+anchors to "today" rather than the corpus's expected date - while Dose 8 immediately after it has
+a real 4-week interval that matched the corpus exactly. An explicit, discussed assumption (an
+existing valid dose auto-satisfies Dose 7's slot, bridging straight to Dose 8) was implemented and
+documented as exactly that - an assumption, not a spec- or data-derived rule - in the code, the
+class doc comment, and here.
+
+**Real `dotnet test` execution disproved the trace it was built on.** The new unit test's own
+"without the fix" assertion failed: Dose 1's own pre-existing Evaluation-context skip condition
+(`Age >= 7 years`, the same one behind the second-gap fix, already documented above) fires WITHIN
+the *original*, unmodified main loop, using the administered dose's own date as reference - not
+just in the new fast-forward pass. For an adult patient, the main loop's own mechanics already try
+a single administered dose against Doses 1-6 in turn, skip each one, and land it on Dose 7, where
+it genuinely gets Satisfied - reaching Dose 8 with no fast-forward or auto-satisfy logic involved
+at all. The auto-satisfy code never actually applied to the cases it was designed for, and its
+presence correlated with conformance failures rising from 255 to 262 - a regression that wasn't
+confirmed safe. `2020-0004`/`2020-0005` themselves are still genuinely unresolved; the real
+explanation is now believed to live in how Diphtheria or Tetanus behave differently from Pertussis
+for the same administered dose, or in the multi-antigen merge - not in anything
+`EvaluateSeriesHistory` does per-antigen.
+
+Reverted. The unit test built to prove the fix was kept and renamed
+(`RealPertussisStandardSeries_OneValidDoseAsAdult_MainLoopsOwnAgeSkipAlreadyReachesDose8`) rather
+than deleted, since what it actually demonstrates - the main loop's own age-skip mechanics
+reaching Dose 8 unassisted - is still real and worth guarding against regression. The dead end
+itself is kept here and in `EvaluateSeriesHistory`'s own class doc comment, not silently dropped,
+so a future attempt at `2020-0004`/`2020-0005` doesn't have to rediscover it.
+
 ## Next steps
 
 **The end-to-end pipeline is complete and has been run successfully against the real, full
