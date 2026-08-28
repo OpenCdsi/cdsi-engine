@@ -1849,6 +1849,87 @@ reaching Dose 8 unassisted - is still real and worth guarding against regression
 itself is kept here and in `EvaluateSeriesHistory`'s own class doc comment, not silently dropped,
 so a future attempt at `2020-0004`/`2020-0005` doesn't have to rediscover it.
 
+### A fourth finding - Option 1 fixed the case it was built for, but caused a net regression
+
+Continuing past the third gap: the corpus's own FITS-derived metadata for `2020-0004`
+(`meta.forecastTestType: "Recommended based on minimum interval from previous dose (catch-up)"`)
+directly confirmed Dose 8's own forecast was the intended answer all along - meaning the real bug
+wasn't in Dose 7 at all, but in `GeneratePatientSeriesForecast.Execute`'s own §7.6 re-forecast
+loop (built in an earlier round for the Hib catch-up scenario) wrongly finding Dose 8 "invalid"
+and cascading past it. Traced end-to-end through a long, careful chain of diagnostics - each one
+verified by real execution before building the next, after the third gap's own hand-trace had
+already been shown wrong once - to a precise root cause: Dose 8's real Forecast-context
+`doseCount > 0 valid doses at age 7+` skip condition was satisfied by the *same* dose that had
+just satisfied Dose 7, the target dose immediately prior in the evaluation chain. Unlike the
+Hib worked example in §7.6's own spec text (a genuinely time-sensitive age condition), a
+doseCount condition like this one is already true the instant the qualifying dose was given, not
+something that becomes newly true over time - so counting the dose that just got the patient
+*to* this point in the chain toward whether the *next* dose should be skipped isn't the kind of
+staleness §7.6 was built to catch.
+
+**Option 1** (of two considered, deliberately the narrower one - "the narrower the scope, the
+stronger the hope"): exclude only whichever dose satisfied the immediately-prior target dose from
+`ValidateRecommendation`'s check specifically, nowhere else. Implemented, tested against
+`2020-0004` first (fixed cleanly, confirmed by real execution: `Cdsi.Core.Tests` 337/337), then
+run against the full conformance corpus - which is where it fell short. Net result: 255 → 275
+failures. `2013-0016` is the clean counterexample: a patient with *multiple* real doses (#1 under
+12 months, #2 and #3 at 7+ years), where the corpus expects Dose 9's own forecast, not Dose 8's.
+Excluding only the single most-recently-satisfied dose isn't enough when the patient has other,
+earlier doses that independently and legitimately satisfy the same doseCount condition - Dose 8
+gets wrongly marked valid anyway, and the loop stops one dose too early. `2020-0005` (two doses,
+not one) was never actually fixed by Option 1 for the same underlying reason - confirmed still
+failing, unchanged, in the same run that fixed `2020-0004`.
+
+Reverted. Kept documented here and in `GeneratePatientSeriesForecast`'s own class doc comment,
+same discipline as the third gap's own reverted assumption, rather than silently dropped.
+
+### A fifth finding - a narrower retry, verified against the merge this time, still not safe
+
+Tracing `2013-0016` through the actual §9 multi-antigen merge (not treating it as a single-antigen
+problem, the mistake that let Option 1's regression go undetected) surfaced a real, deeper
+insight: Diphtheria and Tetanus already correctly reach Dose 9 for this patient through their own
+ordinary main-loop mechanics (they have a real CVX09/Td dose Pertussis's own history doesn't),
+while Pertussis alone correctly stays "stuck" and cascades to a late, valid, Pertussis-specific
+date. `MultipleAntigenVaccineGroup.EarliestDate`'s own real priority-forecast logic then correctly
+takes the *minimum* of the three siblings, landing on Diphtheria/Tetanus's correct `2027-02-05` -
+unless Pertussis's own value becomes *earlier* than theirs, which is exactly what unconditional
+Option 1 did.
+
+**Option 1, narrowed**: only exclude when the antigen has *exactly one* valid dose total (matching
+`2020-0004`'s real shape, where all three antigens share the same single dose and there's no
+sibling divergence to break), not unconditionally. This time, verified against *both* `2020-0004`
+and `2013-0016` together via a real multi-antigen pipeline test
+(`MergeInvestigationTests`, using the same full reference data every conformance test uses, not a
+hand-built single-antigen series) *before* running the full corpus - both targeted tests passed.
+
+Run against the full 1,064-case corpus anyway, on principle. Found a **second, different**
+counterexample the two targeted tests couldn't have caught: `2013-0067` (Dose 1 Td/CVX09 at one
+age, Dose 2 Tdap/CVX115 a month later). CVX09 doesn't map to Pertussis - the same asymmetry that
+made `2013-0016` what it is - so for Pertussis specifically, this patient *also* has exactly one
+valid dose, satisfying the narrowed gate exactly as designed. The gate fires, Pertussis's Dose 8
+goes valid immediately at the wrong, early `2026-09-02`, while Diphtheria/Tetanus correctly reach
+`2027-02-05` - and the merge's own `Min()` wrongly prefers Pertussis's earlier, wrong answer
+again. Same failure mode as the original regression, different patient shape.
+
+**Reverted again - and this time judged not safely fixable at this level at all**, not just "needs
+a narrower condition." The real problem: whether excluding a dose is safe for one antigen depends
+on whether *its own* dose count differs from its *sibling* antigens' - and that is information
+`GeneratePatientSeriesForecast.Execute` genuinely does not have. It runs once per antigen,
+independently, before §9's merge ever combines them; it cannot see whether Diphtheria or Tetanus
+have more (or fewer) qualifying doses than Pertussis does. Any condition written at this level, no
+matter how narrowly scoped to one antigen's own history, can only ever look at that one antigen in
+isolation - and CVX09's real, asymmetric antigen mapping means a new patient shape triggering the
+same sibling-divergence failure is always constructible. Two attempts, two independently-confirmed
+regressions, both through the identical mechanism.
+
+Kept documented in both places, same discipline as every other dead end in this project.
+`MergeInvestigationTests` itself was kept too (not deleted) as regression guards on the current,
+reverted baseline for all three real cases this investigation surfaced, and as a live example of
+the multi-antigen check any future attempt at this bug needs to run *before* being trusted, not
+after finding out the hard way. The real fix, if pursued, most likely belongs in §9's merge itself
+(`MultipleAntigenVaccineGroup`) rather than in this per-antigen function - something that can see
+all three siblings' forecasts together before deciding which one(s) to trust.
+
 ## Next steps
 
 **The end-to-end pipeline is complete and has been run successfully against the real, full

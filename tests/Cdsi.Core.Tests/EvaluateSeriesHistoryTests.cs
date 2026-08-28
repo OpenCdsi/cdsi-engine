@@ -313,4 +313,127 @@ public class EvaluateSeriesHistoryTests
             Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected, assessmentDate);
         Assert.Equal(8, withSecondPass.CurrentTargetDoseNumber); // unchanged - the fast-forward pass has nothing left to do here
     }
+
+    [Fact]
+    public void DiagnosticOnly_RealPertussis_2013_0016_ThreeDoses_WhereDoesTheMainLoopLand()
+    {
+        // DIAGNOSTIC, not a fix. Real corpus case 2013-0016 (DOB 2019-07-05, DTaP CVX107 at
+        // ~8 months, Td CVX09 at 7 years, Tdap CVX115 one month later) is the counterexample that
+        // sank Option 1 (see GeneratePatientSeriesForecast's own class doc comment): the corpus
+        // expects Dose 9's own forecast (2027-02-05), not Dose 8's, because this patient has
+        // MULTIPLE real doses beyond just whichever satisfied the immediately-prior target dose.
+        //
+        // Before designing Option 2, checking a basic question with real data rather than
+        // continuing to hand-trace: does the MAIN evaluation loop (no assessmentDate, no
+        // re-forecast loop involved at all) already land on the right target dose for this
+        // patient via its own ordinary within-loop skip mechanics, or does §7.6's re-forecast
+        // loop need to intervene here the same way it did for 2020-0004? This determines whether
+        // Option 2 even needs to fire for this specific case.
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+            .Single(s => s.SeriesName == "Pertussis standard series");
+
+        var dob = new DateOnly(2019, 7, 5);
+        var patient = MakePatient(dob);
+
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "107", DateAdministered = new DateOnly(2020, 3, 5) },
+            new VaccineDoseAdministered { DoseId = "d2", Cvx = "09", DateAdministered = new DateOnly(2026, 7, 5) },
+            new VaccineDoseAdministered { DoseId = "d3", Cvx = "115", DateAdministered = new DateOnly(2026, 8, 5) }
+        };
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, doses, Schedule.CvxToAntigen);
+        var pertussisRecords = antigenRecords.Where(r => r.Antigen == "Pertussis").OrderBy(r => r.DateAdministered).ToArray();
+
+        var result = EvaluateSeriesHistory.Execute(
+            patient, pertussisSeries, pertussisRecords, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        // Deliberately asserting a specific guess (9, matching the corpus's own expected target)
+        // so a mismatch reveals the real answer directly in the failure message, the same
+        // discipline used throughout this investigation rather than assuming the guess is right.
+        Assert.Equal(9, result.CurrentTargetDoseNumber);
+    }
+
+    [Fact]
+    public void DiagnosticOnly_RealPertussis_2013_0016_ThreeDoses_ExactlyWhichDoseSatisfiedWhichTargetDose()
+    {
+        // DIAGNOSTIC, not a fix. Companion to the diagnostic immediately above, which confirmed
+        // the main loop lands at Dose 8 (same starting point as 2020-0004) - but WHICH of the
+        // three real doses satisfied Dose 7 (the immediately-prior target dose, the one Option 1
+        // would have excluded) matters directly for understanding why Option 1 broke this case:
+        // hand-reasoning about this produced a genuine contradiction (CVX09 is in Dose 8's own
+        // specific skip-condition CVX list and, if it did NOT satisfy Dose 7, should still have
+        // been counted under Option 1's exclusion rule - yet real execution showed Option 1
+        // breaking this exact case). Rather than keep guessing, dumping AllEvaluatedDoses's real
+        // contents directly - CVX, date, status, and which target dose each satisfied - to get
+        // the precise, real answer.
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+            .Single(s => s.SeriesName == "Pertussis standard series");
+
+        var dob = new DateOnly(2019, 7, 5);
+        var patient = MakePatient(dob);
+
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "107", DateAdministered = new DateOnly(2020, 3, 5) },
+            new VaccineDoseAdministered { DoseId = "d2", Cvx = "09", DateAdministered = new DateOnly(2026, 7, 5) },
+            new VaccineDoseAdministered { DoseId = "d3", Cvx = "115", DateAdministered = new DateOnly(2026, 8, 5) }
+        };
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, doses, Schedule.CvxToAntigen);
+        var pertussisRecords = antigenRecords.Where(r => r.Antigen == "Pertussis").OrderBy(r => r.DateAdministered).ToArray();
+
+        var result = EvaluateSeriesHistory.Execute(
+            patient, pertussisSeries, pertussisRecords, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        var dump = string.Join(" | ", result.AllEvaluatedDoses.Select(d =>
+            $"Cvx={d.Cvx} Date={d.DateAdministered:yyyy-MM-dd} Status={d.Status} SatisfiedTargetDoseNumber={d.SatisfiedTargetDoseNumber}"));
+
+        // Assert.True with a custom message, not a string-equality assertion - xUnit truncates
+        // long string diffs (confirmed: the first attempt at this test got cut off at "pos 0"
+        // with no way to see past it), but a custom failure message on Assert.True is displayed
+        // in full, since it isn't doing a string comparison to show a diff for at all.
+        Assert.True(false, $"Count={result.AllEvaluatedDoses.Count} | {dump}");
+    }
+
+    [Fact]
+    public void DiagnosticOnly_RealTetanus_2013_0016_ThreeDoses_ExactlyWhichDoseSatisfiedWhichTargetDose()
+    {
+        // DIAGNOSTIC, not a fix. The Pertussis-only version of this diagnostic revealed something
+        // important: CVX09 (Td) is completely absent from Pertussis's own AllEvaluatedDoses -
+        // confirmed via the real XML, CVX09 maps only to Tetanus and Diphtheria, not Pertussis
+        // ("Td" explicitly means no pertussis component, unlike "Tdap"). That means the
+        // Pertussis-only investigation so far has been incomplete for this specific patient - for
+        // Pertussis alone, only CVX107 and CVX115 count (neither is in Dose 8's own specific
+        // skip-condition CVX list), so Pertussis alone likely gets stuck at Dose 8 too, same as
+        // 2020-0004. But the corpus's expectation is for the OVERALL DTaP/Tdap/Td GROUP forecast,
+        // not Pertussis alone - so Diphtheria or Tetanus, which DO include the CVX09 dose, may be
+        // where this patient's forecast is actually correctly reaching Dose 9, with the
+        // multi-antigen merge picking their later date over Pertussis's stuck-at-Dose-8 one.
+        // Checking Tetanus (identical Dose 7/8/9 structure to Pertussis, already confirmed
+        // earlier in this investigation) with the same real patient data to see if this holds.
+        var tetanusSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Tetanus-508.xml"))
+            .Single(s => s.SeriesName == "Tetanus standard series");
+
+        var dob = new DateOnly(2019, 7, 5);
+        var patient = MakePatient(dob);
+
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "107", DateAdministered = new DateOnly(2020, 3, 5) },
+            new VaccineDoseAdministered { DoseId = "d2", Cvx = "09", DateAdministered = new DateOnly(2026, 7, 5) },
+            new VaccineDoseAdministered { DoseId = "d3", Cvx = "115", DateAdministered = new DateOnly(2026, 8, 5) }
+        };
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, doses, Schedule.CvxToAntigen);
+        var tetanusRecords = antigenRecords.Where(r => r.Antigen == "Tetanus").OrderBy(r => r.DateAdministered).ToArray();
+
+        var result = EvaluateSeriesHistory.Execute(
+            patient, tetanusSeries, tetanusRecords, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        var dump = string.Join(" | ", result.AllEvaluatedDoses.Select(d =>
+            $"Cvx={d.Cvx} Date={d.DateAdministered:yyyy-MM-dd} Status={d.Status} SatisfiedTargetDoseNumber={d.SatisfiedTargetDoseNumber}"));
+
+        Assert.True(false, $"CurrentTargetDoseNumber={result.CurrentTargetDoseNumber} | Count={result.AllEvaluatedDoses.Count} | {dump}");
+    }
 }

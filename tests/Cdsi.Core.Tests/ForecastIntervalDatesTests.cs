@@ -69,4 +69,28 @@ public class ForecastIntervalDatesTests
 
         Assert.Null(result);
     }
+
+    [Fact]
+    public void DiagnosticOnly_RealPertussisDose8_LatestMinIntervalDate_InIsolation()
+    {
+        // DIAGNOSTIC, not a fix. Real Dose 8 of the Pertussis standard series has one interval
+        // group: FromPrevious, minInt "4 weeks". Testing this function completely in isolation -
+        // no loop, no merge, no other pipeline layer - to check a specific, narrow hypothesis
+        // after a full-pipeline diagnostic produced a result none of several hand-traces could
+        // explain (see GeneratePatientSeriesForecastTests's own diagnostics). A resolver that
+        // simply always returns the one real administered date (2026-08-05, this patient's only
+        // dose) for FromPrevious should - per this function's own already-tested, already-correct
+        // behavior on real HepB data above - produce 2026-08-05 + 4 weeks = 2026-09-02. If this
+        // comes back anything else, the bug is genuinely inside this function or how Dose 8's own
+        // PreferableIntervals load from the real XML, not in the re-forecast loop or the merge.
+        var pertussisDose8Intervals = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+            .Single(s => s.SeriesName == "Pertussis standard series")
+            .SeriesDoses.Single(d => d.DoseNumber == 8).PreferableIntervals;
+
+        DateOnly? Resolve(PreferableIntervalRule rule) => rule.ReferenceType == IntervalReferenceType.FromPrevious ? new DateOnly(2026, 8, 5) : null;
+
+        var result = ForecastIntervalDates.LatestMinIntervalDate(new DateOnly(2026, 8, 5), pertussisDose8Intervals, Resolve);
+
+        Assert.Equal(new DateOnly(2026, 9, 2), result);
+    }
 }

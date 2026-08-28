@@ -384,4 +384,209 @@ public class GeneratePatientSeriesForecastTests
         Assert.Equal(true, forecast.IsValidRecommendation); // Dose 3's own attempt would have been invalid - this must reflect Dose 4's, which is valid
         Assert.Equal(new DateOnly(2021, 2, 9), forecast.Dates!.EarliestDate); // Dose 4's own interval math (Dose 2 + 8 weeks), not Dose 3's (which would have been 2021-01-12)
     }
+
+    [Fact]
+    public void DiagnosticOnly_RealPertussisFullForecast_OneValidDoseAsAdult_WhereDoesTheReForecastLoopActuallyLand()
+    {
+        // DIAGNOSTIC, not a fix - reverted back to this state after the Option 1 fix that once
+        // lived here was itself reverted (see this class's own doc comment for the full story:
+        // Option 1 fixed 2020-0004 but caused a net regression elsewhere - 2013-0016's multi-dose
+        // scenario is the clean counterexample). Confirms real corpus case 2020-0004's own
+        // re-forecast loop still cascades to a wrong result on the current, reverted baseline.
+        // The assertion intentionally checks against the corpus's own expected date (2026-09-02)
+        // - if this fails, the failure message's "Actual:" value is the real, current answer.
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+            .Single(s => s.SeriesName == "Pertussis standard series");
+        var emptyImmunity = new AntigenImmunityData { ClinicalHistoryGuidelines = Array.Empty<ImmunityClinicalHistoryGuideline>(), BirthDateRules = Array.Empty<ImmunityBirthDateRule>() };
+        var emptyContraindications = new AntigenContraindicationData { AntigenLevel = Array.Empty<AntigenContraindication>(), VaccineLevel = Array.Empty<VaccineContraindication>() };
+
+        var dob = new DateOnly(1995, 8, 5);
+        var patient = MakePatient(dob);
+        var assessmentDate = new DateOnly(2026, 8, 5);
+
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "115", DateAdministered = new DateOnly(2026, 8, 5) }
+        };
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, doses, Schedule.CvxToAntigen);
+        var pertussisRecords = antigenRecords.Where(r => r.Antigen == "Pertussis").OrderBy(r => r.DateAdministered).ToArray();
+
+        var seriesHistory = EvaluateSeriesHistory.Execute(
+            patient, pertussisSeries, pertussisRecords, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected, assessmentDate);
+        Assert.Equal(8, seriesHistory.CurrentTargetDoseNumber); // sanity check, confirmed by the real Pertussis test in EvaluateSeriesHistoryTests
+
+        var forecast = GeneratePatientSeriesForecast.Execute(
+            patient, pertussisSeries, seriesHistory, assessmentDate,
+            emptyImmunity, emptyContraindications,
+            Array.Empty<PriorVaccineDoseAdministered>(), Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        Assert.Equal(new DateOnly(2026, 9, 2), forecast.Dates!.EarliestDate);
+    }
+
+    [Theory]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(11)]
+    public void DiagnosticOnly_RealPertussisDose8Through11_EachStartingPointIndependently(int startingDoseNumber)
+    {
+        // DIAGNOSTIC, not a fix - reverted back to this state after the Option 1 fix that once
+        // lived here was itself reverted (see this class's own doc comment for the full story).
+        // On the CURRENT, reverted baseline, forces Execute's own internal loop to start at EACH
+        // candidate dose independently, via a synthetic SeriesHistoryResult with
+        // CurrentTargetDoseNumber set directly (the real AllEvaluatedDoses/DoseResults are reused
+        // unchanged regardless of where the loop starts), confirming all four converge on the
+        // same wrong result - the finding that originally pointed at mostRecentAdministeredDate
+        // and, from there, at the real root cause in ValidateRecommendation's own doseCount check.
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+            .Single(s => s.SeriesName == "Pertussis standard series");
+        var emptyImmunity = new AntigenImmunityData { ClinicalHistoryGuidelines = Array.Empty<ImmunityClinicalHistoryGuideline>(), BirthDateRules = Array.Empty<ImmunityBirthDateRule>() };
+        var emptyContraindications = new AntigenContraindicationData { AntigenLevel = Array.Empty<AntigenContraindication>(), VaccineLevel = Array.Empty<VaccineContraindication>() };
+
+        var dob = new DateOnly(1995, 8, 5);
+        var patient = MakePatient(dob);
+        var assessmentDate = new DateOnly(2026, 8, 5);
+
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "115", DateAdministered = new DateOnly(2026, 8, 5) }
+        };
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, doses, Schedule.CvxToAntigen);
+        var pertussisRecords = antigenRecords.Where(r => r.Antigen == "Pertussis").OrderBy(r => r.DateAdministered).ToArray();
+
+        var realSeriesHistory = EvaluateSeriesHistory.Execute(
+            patient, pertussisSeries, pertussisRecords, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected, assessmentDate);
+
+        var forcedSeriesHistory = new SeriesHistoryResult
+        {
+            DoseResults = realSeriesHistory.DoseResults,
+            AllEvaluatedDoses = realSeriesHistory.AllEvaluatedDoses,
+            CurrentTargetDoseNumber = startingDoseNumber
+        };
+
+        var forecast = GeneratePatientSeriesForecast.Execute(
+            patient, pertussisSeries, forcedSeriesHistory, assessmentDate,
+            emptyImmunity, emptyContraindications,
+            Array.Empty<PriorVaccineDoseAdministered>(), Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected);
+
+        var expected = new DateOnly(2026, 8, 5); // all four starting points converge on the same wrong result on the reverted baseline
+
+        Assert.Equal(expected, forecast.Dates?.EarliestDate);
+    }
+
+    [Fact]
+    public void DiagnosticOnly_RealPertussisAllEvaluatedDoses_ContentsForThisAdultPatient()
+    {
+        // DIAGNOSTIC, not a fix. The isolated ForecastIntervalDatesTests diagnostic confirmed
+        // ForecastIntervalDates.LatestMinIntervalDate itself is correct (2026-09-02) given a
+        // trivial resolver. The real pipeline's own resolver (GeneratePatientSeriesForecast's
+        // private BuildIntervalReferenceResolver, which can't be unit-tested directly) filters
+        // seriesHistory.AllEvaluatedDoses to `Status is Valid or NotValid`, orders by date
+        // descending, and takes the first DateAdministered - manually replicating that exact
+        // LINQ expression here, against this same patient's REAL AllEvaluatedDoses, to check
+        // whether it produces 2026-08-05 as expected or something else (null, wrong Status,
+        // wrong count) that would explain why the real pipeline's forecast doesn't match this
+        // function's own already-confirmed-correct behavior.
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+            .Single(s => s.SeriesName == "Pertussis standard series");
+
+        var dob = new DateOnly(1995, 8, 5);
+        var patient = MakePatient(dob);
+        var assessmentDate = new DateOnly(2026, 8, 5);
+
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "115", DateAdministered = new DateOnly(2026, 8, 5) }
+        };
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, doses, Schedule.CvxToAntigen);
+        var pertussisRecords = antigenRecords.Where(r => r.Antigen == "Pertussis").OrderBy(r => r.DateAdministered).ToArray();
+
+        var realSeriesHistory = EvaluateSeriesHistory.Execute(
+            patient, pertussisSeries, pertussisRecords, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected, assessmentDate);
+
+        Assert.Equal(1, realSeriesHistory.AllEvaluatedDoses.Count);
+        Assert.Equal(EvaluationStatus.Valid, realSeriesHistory.AllEvaluatedDoses[0].Status);
+        Assert.Equal(new DateOnly(2026, 8, 5), realSeriesHistory.AllEvaluatedDoses[0].DateAdministered);
+
+        // The exact replicated FromPrevious resolution logic:
+        var resolvedFromPrevious = realSeriesHistory.AllEvaluatedDoses
+            .Where(d => d.Status is EvaluationStatus.Valid or EvaluationStatus.NotValid)
+            .OrderByDescending(d => d.DateAdministered)
+            .FirstOrDefault()?.DateAdministered;
+
+        Assert.Equal(new DateOnly(2026, 8, 5), resolvedFromPrevious);
+    }
+
+    [Theory]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(11)]
+    public void DiagnosticOnly_RealPertussisDose8Through11_ComputeForecastForTargetDose_CalledDirectlyBypassingTheLoop(int doseNumber)
+    {
+        // DIAGNOSTIC, not a fix. Every individually-tested piece of the interval computation
+        // checked out correct in isolation (see the diagnostics immediately above and in
+        // ForecastIntervalDatesTests), yet the real loop still produces a result none of them
+        // predicted. ComputeForecastForTargetDose was made internal (from private) specifically
+        // so this test could call it directly for ONE dose at a time - completely bypassing
+        // Execute's own re-forecast loop and its retry mechanics - to see exactly what this
+        // function itself produces when actually run for real, for each real dose, in isolation.
+        //
+        // Extended from Dose 8 alone (already confirmed correct: 2026-09-02) to cover 9, 10, 11
+        // to test a specific hypothesis: mostRecentAdministeredDate is computed as the Max
+        // DateAdministered across ALL of seriesHistory.AllEvaluatedDoses, UNCONDITIONALLY -
+        // confirmed by reading ComputeForecastForTargetDose's own code - regardless of which
+        // target dose is currently being forecast. For this patient (one dose, given ON the
+        // assessment date), that floor is 2026-08-05 for every single dose number. Dose 9's own
+        // real 6-month interval (2027-02-05) should still beat that floor. But Dose 10 and 11
+        // both use a FromMostRecent interval reference filtered to CVX codes that exclude this
+        // patient's one dose (resolving to null), leaving only their own minAge (11 years,
+        // trivially met, decades in this patient's past) to compete against the 2026-08-05 floor
+        // in the final Max - which the floor would win, producing "today" instead of their own
+        // genuine, much-earlier age-based date. If Dose 10/11 come back as 2026-08-05 here, that
+        // confirms mostRecentAdministeredDate is the real, final piece of this bug - not the
+        // loop's retry logic, which has checked out correct at every other point tested so far.
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+            .Single(s => s.SeriesName == "Pertussis standard series");
+        var targetDose = pertussisSeries.SeriesDoses.Single(d => d.DoseNumber == doseNumber);
+        var emptyImmunity = new AntigenImmunityData { ClinicalHistoryGuidelines = Array.Empty<ImmunityClinicalHistoryGuideline>(), BirthDateRules = Array.Empty<ImmunityBirthDateRule>() };
+        var emptyContraindications = new AntigenContraindicationData { AntigenLevel = Array.Empty<AntigenContraindication>(), VaccineLevel = Array.Empty<VaccineContraindication>() };
+
+        var dob = new DateOnly(1995, 8, 5);
+        var patient = MakePatient(dob);
+        var assessmentDate = new DateOnly(2026, 8, 5);
+
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "115", DateAdministered = new DateOnly(2026, 8, 5) }
+        };
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, doses, Schedule.CvxToAntigen);
+        var pertussisRecords = antigenRecords.Where(r => r.Antigen == "Pertussis").OrderBy(r => r.DateAdministered).ToArray();
+
+        var seriesHistory = EvaluateSeriesHistory.Execute(
+            patient, pertussisSeries, pertussisRecords, Array.Empty<EvaluatedAntigenDose>(),
+            Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected, assessmentDate);
+
+        var hasNotSatisfiedTargetDose = !seriesHistory.SeriesComplete;
+        var hasSatisfiedTargetDose = seriesHistory.AllEvaluatedDoses.Any(d => d.SatisfiedTargetDoseNumber is not null);
+
+        var attempt = GeneratePatientSeriesForecast.ComputeForecastForTargetDose(
+            patient, pertussisSeries, seriesHistory, assessmentDate, emptyImmunity, emptyContraindications,
+            Array.Empty<PriorVaccineDoseAdministered>(), Schedule.ConflictsByImpactedCvx, NoCompletedSeriesExpected,
+            targetDose, hasNotSatisfiedTargetDose, hasSatisfiedTargetDose);
+
+        Assert.True(attempt.ShouldForecast);
+        var expected = doseNumber switch
+        {
+            8 => new DateOnly(2026, 9, 2),  // confirmed correct in the original single-dose diagnostic
+            9 => new DateOnly(2027, 2, 5),  // real 6-month interval from the same 2026-08-05 dose
+            10 => new DateOnly(2026, 8, 5), // testing the mostRecentAdministeredDate-floor hypothesis
+            11 => new DateOnly(2026, 8, 5), // same hypothesis
+            _ => throw new ArgumentOutOfRangeException(nameof(doseNumber))
+        };
+        Assert.Equal(expected, attempt.Dates?.EarliestDate);
+    }
 }

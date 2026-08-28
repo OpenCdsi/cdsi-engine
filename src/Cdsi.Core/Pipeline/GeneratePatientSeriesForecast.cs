@@ -51,6 +51,72 @@ public sealed class PatientSeriesForecastResult
 /// - `latestConflictEndDate` is CALCDTCONFLICT-3, a genuine new forward-looking calculation
 ///   (see ForecastConflictEndDate) - reuses the exact same VaccineConflictRule reference data
 ///   §6.7 already uses, just walked forward instead of backward.
+///
+/// A REAL BUG FOUND IN THE §7.6 RE-FORECAST LOOP ITSELF, TRACED CLEANLY, BUT THE FIRST FIX TRIED
+/// (Option 1) WAS REVERTED AFTER REAL EXECUTION SHOWED A NET REGRESSION - kept documented rather
+/// than silently dropped, same discipline as EvaluateSeriesHistory's own reverted Dose 7
+/// auto-satisfy assumption. Found via real corpus cases 2020-0004/2020-0005 (adult DTaP/Tdap/Td
+/// catch-up, exactly one or more prior valid doses), traced end-to-end through a long chain of
+/// diagnostics rather than fixed on a hand-trace. Confirmed, each step independently: Dose 8's
+/// own computation is correct (ComputeForecastForTargetDose called directly for Dose 8 alone,
+/// bypassing this loop entirely, produces the right date); the corpus's own FITS-derived
+/// metadata confirms Dose 8's forecast IS the intended answer for 2020-0004 ("Recommended based
+/// on minimum interval from previous dose (catch-up)"); yet the loop found Dose 8 "invalid" via
+/// ValidateRecommendation and cascaded all the way to Dose 11, exhausting to a wrong result (also
+/// individually confirmed: Dose 11's own computation is dominated by mostRecentAdministeredDate,
+/// an unconditional floor - a real, but ultimately spec-consistent, sibling-implementation-
+/// consistent design once checked against latestInadvertentAdministrationDate above, not the
+/// actual bug). Root cause: Dose 8's real Forecast-context "doseCount > 0 valid doses at age 7+"
+/// skip condition was satisfied by the SAME dose that had just satisfied Dose 7, the target dose
+/// immediately prior in the evaluation chain - not a genuinely separate, additional dose beyond
+/// it. Unlike the Hib worked example in §7.6's own spec text (a genuinely time-sensitive AGE
+/// condition - the patient's age legitimately changes by the time a forecast's own earliest date
+/// arrives), a doseCount condition like this one is already true the instant the qualifying dose
+/// was administered, not something that becomes newly true over time.
+///
+/// Option 1, tried first (deliberately the narrowest of several considered, on "the narrower the
+/// scope, the stronger the hope"): exclude only whichever dose satisfied the immediately-prior
+/// target dose from the ValidateRecommendation check specifically. Fixed 2020-0004 cleanly,
+/// confirmed by real execution. But real execution against the FULL conformance corpus also
+/// showed a net regression (255 -> 275 failures) - 2013-0016 is the clean, telling counterexample:
+/// a patient with MULTIPLE real doses (#1 under 12mo, #2 and #3 at 7+ years), where the corpus
+/// expects Dose 9's own forecast (a genuine later date), not Dose 8's. Excluding only the single
+/// most-recently-satisfied dose isn't enough when the patient has other, earlier doses that
+/// independently and legitimately satisfy the same doseCount condition - Dose 8 gets wrongly
+/// marked valid anyway, and the loop stops one dose too early. 2020-0005 (two doses, not one) was
+/// never actually fixed by Option 1 for the same underlying reason.
+///
+/// Reverted, retried narrower (OPTION 1, NARROWED: only exclude when this antigen has EXACTLY
+/// ONE valid dose total, matching 2020-0004's real shape, rather than unconditionally). Verified
+/// first against BOTH 2020-0004 and 2013-0016 together via a real multi-antigen pipeline test
+/// (MergeInvestigationTests, still present) - not a single antigen in isolation, the mistake that
+/// let the original Option 1's regression go undetected until a full conformance run. Both
+/// verification tests passed. Then run against the full 1,064-case corpus anyway, on principle -
+/// and found a SECOND, DIFFERENT counterexample the two targeted tests couldn't have caught:
+/// 2013-0067 (Dose 1 Td/CVX09 at one age, Dose 2 Tdap/CVX115 a month later). CVX09 doesn't map to
+/// Pertussis (same asymmetry that made 2013-0016 what it is) - so for Pertussis specifically, this
+/// patient also has exactly ONE valid dose, satisfying the narrowed gate exactly as designed. The
+/// gate fires, Pertussis's Dose 8 goes valid immediately at the wrong, early 2026-09-02 - while
+/// Diphtheria and Tetanus (which DO have the CVX09 dose, so the gate correctly stays off for them)
+/// correctly reach Dose 9's 2027-02-05 - and the merge's own Min() wrongly prefers Pertussis's
+/// earlier, wrong answer again. Same failure mode as the original regression, different patient
+/// shape.
+///
+/// REVERTED AGAIN - and this time judged not safely fixable at this level at all, not just
+/// "needs a narrower condition." The real problem: whether excluding a dose is safe for one
+/// antigen depends on whether ITS OWN dose count differs from its SIBLING antigens' - and that is
+/// information this function genuinely does not have. GeneratePatientSeriesForecast.Execute runs
+/// once per antigen, independently, before §9's merge ever combines them; it cannot see whether
+/// Diphtheria or Tetanus have more (or fewer) qualifying doses than Pertussis does. Any condition
+/// written here, no matter how narrowly scoped to Pertussis's own history, can only ever look at
+/// one antigen in isolation - and CVX09's real, asymmetric antigen mapping (Tetanus/Diphtheria
+/// yes, Pertussis no) means a new patient shape triggering the same sibling-divergence failure is
+/// always constructible. Two attempts, two independently-confirmed regressions, both through the
+/// identical mechanism (an antigen's re-forecast loop becoming "valid" at an earlier-than-correct
+/// date, then winning the merge's own Min() over a genuinely correct sibling). The real fix, if
+/// one is pursued, most likely belongs in §9's merge itself (MultipleAntigenVaccineGroup) rather
+/// than in this per-antigen function - something that can see all three siblings' forecasts
+/// together before deciding which one(s) to trust, which this function structurally cannot do.
 /// </summary>
 public static class GeneratePatientSeriesForecast
 {
@@ -112,7 +178,20 @@ public static class GeneratePatientSeriesForecast
         }
     }
 
-    private static PatientSeriesForecastResult ComputeForecastForTargetDose(
+    /// <summary>
+    /// Internal, not private, purely so a test can call this directly for one specific target
+    /// dose - bypassing Execute's own re-forecast loop entirely - as a diagnostic step. No
+    /// behavior change; visibility only, matching this project's existing precedent
+    /// (EvaluateDoseAgainstTargetDose.MapToPriorDoseForSkipOrConflict is internal for the same
+    /// reason). See GeneratePatientSeriesForecastTests's own diagnostic for why this was needed:
+    /// every individually-tested piece of the interval computation (LatestMinIntervalDate,
+    /// CalculateCandidateEarliestDate, the FromPrevious resolution logic replicated against real
+    /// AllEvaluatedDoses data) checked out correct in isolation, yet the full loop still produced
+    /// a result none of them predicted - meaning the discrepancy has to be in something only
+    /// visible when this function runs for real, for one specific dose, without the loop's own
+    /// retry mechanics able to obscure which attempt produced which value.
+    /// </summary>
+    internal static PatientSeriesForecastResult ComputeForecastForTargetDose(
         Patient patient,
         AntigenSeries series,
         SeriesHistoryResult seriesHistory,
