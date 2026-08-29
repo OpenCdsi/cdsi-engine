@@ -86,10 +86,50 @@ public sealed partial class DurationExpression
     {
         DurationUnit.Days => date.AddDays(value),
         DurationUnit.Weeks => date.AddDays(value * 7),
-        DurationUnit.Months => date.AddMonths(value),
-        DurationUnit.Years => date.AddYears(value),
+        DurationUnit.Months => AddMonthsWithRollover(date, value),
+        DurationUnit.Years => AddMonthsWithRollover(date, value * 12),
         _ => throw new ArgumentOutOfRangeException(nameof(unit))
     };
+
+    /// <summary>
+    /// REAL BUG, FOUND AND FIXED - found via real corpus cases 2013-0003/2013-0130/2013-0165
+    /// (DTaP-family, DOB 2026-05-31, dose 3 recommendedDate: expected 2026-12-01, got
+    /// 2026-11-30) - a single, isolated, one-day mismatch, but genuinely spec-confirmed and
+    /// wide-reaching, since every age/interval calculation in this project involving months or
+    /// years goes through this one function.
+    ///
+    /// .NET's own DateOnly.AddMonths/AddYears CLAMP when the source day-of-month doesn't exist
+    /// in the target month (May 31 + 6 months = November 30, since November only has 30 days) -
+    /// standard, unsurprising .NET behavior, but it directly contradicts CALCDT-5's own explicit
+    /// text and worked examples: "A computed date which is not a real date must be moved forward
+    /// to first day of the next month" - "03/31/2000 + 6 months = 10/01/2000 (September 31 does
+    /// not exist)" and "08/31/2010 + 6 months = 03/01/2011 (February 31 does not exist)". The
+    /// spec wants ROLLOVER to the 1st of the month AFTER the invalid one, not clamping down to
+    /// the invalid month's own last real day.
+    ///
+    /// Fixed by detecting clamping directly (compare the naive .NET result's own day-of-month
+    /// against the anchor's) rather than trying to independently reimplement "is this a real
+    /// date" logic, and rolling forward to the 1st of the following month when it occurred -
+    /// matching CALCDT-5's own worked examples exactly (both hand-verified: 03/31/2000 + 6
+    /// months and 08/31/2010 + 6 months both reproduce the spec's own stated results). Applied to
+    /// years too, not just months, since the identical "source day doesn't exist in the target
+    /// month" problem can occur there too (e.g. Feb 29 + 1 year landing on a non-leap year) - the
+    /// spec's own CALCDT-1/CALCDT-2 pairing treats year-then-month adjustment as the same kind of
+    /// operation, and nothing in CALCDT-5's own text scopes the "not a real date" rule to months
+    /// only. Implemented by counting years as 12 months, reusing one code path.
+    /// </summary>
+    private static DateOnly AddMonthsWithRollover(DateOnly date, int months)
+    {
+        var naive = date.AddMonths(months);
+        if (naive.Day != date.Day)
+        {
+            // Clamped - .NET rounded down to the target month's own last real day because the
+            // anchor's day-of-month doesn't exist there. Roll forward to the 1st of the
+            // following month instead, per CALCDT-5.
+            return new DateOnly(naive.Year, naive.Month, 1).AddMonths(1);
+        }
+        return naive;
+    }
 
     /// <summary>Applies this duration to an anchor date (e.g. date of birth, a reference dose date).</summary>
     public DateOnly AddTo(DateOnly anchor)

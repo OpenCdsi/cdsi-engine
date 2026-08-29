@@ -65,6 +65,49 @@ public class DurationExpressionTests
     }
 
     [Fact]
+    public void MonthsAddition_WhenTargetDayDoesNotExist_RollsToFirstOfFollowingMonth_SpecExample1()
+    {
+        // REAL BUG, FOUND AND FIXED - see AddMonthsWithRollover's own doc comment for the full
+        // derivation. CALCDT-5's own first worked example, verbatim: "03/31/2000 + 6 months =
+        // 10/01/2000 (September 31 does not exist)". .NET's own DateOnly.AddMonths would clamp
+        // to 09/30/2000 instead - this asserts the spec's own literal answer, not .NET's default.
+        var d = DurationExpression.Parse("6 months");
+        Assert.Equal(new DateOnly(2000, 10, 1), d.AddTo(new DateOnly(2000, 3, 31)));
+    }
+
+    [Fact]
+    public void MonthsAddition_WhenTargetDayDoesNotExist_RollsToFirstOfFollowingMonth_SpecExample2()
+    {
+        // CALCDT-5's own second worked example, verbatim: "08/31/2010 + 6 months = 03/01/2011
+        // (February 31 does not exist)" - also confirms the rollover crosses a year boundary
+        // correctly (February 2011, not a leap year, only has 28 days).
+        var d = DurationExpression.Parse("6 months");
+        Assert.Equal(new DateOnly(2011, 3, 1), d.AddTo(new DateOnly(2010, 8, 31)));
+    }
+
+    [Fact]
+    public void MonthsAddition_WhenTargetDayDoesNotExist_RollsToFirstOfFollowingMonth_RealCorpusCase()
+    {
+        // Real corpus cases 2013-0003/2013-0130/2013-0165 (DTaP-family, DOB 2026-05-31): the
+        // real bug this fix addresses, reconstructed directly - "05/31/2026 + 6 months" naively
+        // clamps to 11/30/2026 (November only has 30 days), but CALCDT-5 says it should roll to
+        // 12/01/2026 - exactly the real corpus's own expected recommendedDate.
+        var d = DurationExpression.Parse("6 months");
+        Assert.Equal(new DateOnly(2026, 12, 1), d.AddTo(new DateOnly(2026, 5, 31)));
+    }
+
+    [Fact]
+    public void MonthsAddition_WhenTargetDayDoesExist_NoRollover()
+    {
+        // Regression guard: confirms the rollover logic doesn't fire when it shouldn't - a
+        // genuinely valid target date (day 30 exists in every month) is returned as-is, not
+        // pushed forward to the 1st of the next month.
+        var d = DurationExpression.Parse("1 month");
+        Assert.Equal(new DateOnly(2024, 2, 29), d.AddTo(new DateOnly(2024, 1, 29))); // 2024 is a leap year - Feb 29 exists
+        Assert.Equal(new DateOnly(2024, 4, 30), d.AddTo(new DateOnly(2024, 3, 30)));
+    }
+
+    [Fact]
     public void TryParse_EmptyOrWhitespace_ReturnsFalse()
     {
         Assert.False(DurationExpression.TryParse(null, out _));
