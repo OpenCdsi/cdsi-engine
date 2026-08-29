@@ -190,8 +190,35 @@ public static class GeneratePatientForecast
             // reporting purposes. Falls back to whichever series exists if none is Standard (e.g.
             // a patient who legitimately only has Risk-series winners) - unaffected, unchanged
             // behavior from before this fix.
+            //
+            // EXTENDED - found via real corpus case 2024-0056 (RSV, 75-year-old with one Arexvy
+            // dose): the SeriesType preference alone isn't enough when the multi-winner scenario
+            // involves TWO Standard-type series from different groups, not Standard-vs-Risk. RSV
+            // has "RSV 1-dose series" (group 1, no age restriction at all) and "RSV 75 years+
+            // 1-dose series" (group 3, real minAgeToStart is 50 years) - BOTH SeriesType.Standard,
+            // both defaultSeries=Yes, both legitimately relevant and both winning §8.8 for a
+            // 75-year-old. Confirmed via a real diagnostic (RsvInvestigationTests, same pipeline-
+            // tracing pattern as the Pneumococcal one): "RSV 1-dose series" comes back
+            // PatientSeriesStatus.AgedOut (the dose flagged "Inadvertent Administration" - this
+            // series genuinely isn't meant for this patient), while "RSV 75 years+ 1-dose series"
+            // correctly comes back Complete, matching the real corpus exactly. Deliberately
+            // narrow, not a general ranking of all six PatientSeriesStatus values: among series
+            // tied on the SeriesType preference above, prefer whichever is NOT AgedOut - AgedOut
+            // specifically means "this series doesn't really apply to this patient anymore," the
+            // same underlying reason a Risk series lost to a Standard one above.
+            //
+            // CONFIRMED INCOMPLETE ON ITS OWN, by a real run against 2024-0056 directly: this
+            // correctly fixes doseDetailsByAntigen's own per-dose Valid/NotValid conformance
+            // detail, one of the corpus's own two real mismatches for this case - but the
+            // OTHER mismatch, the group's own seriesStatus (AgedOut instead of Complete), comes
+            // from a completely different, untouched computation - MergeVaccineGroupForecast
+            // reading bestSeriesByVaccineGroup, which still contains both winners unchanged. See
+            // SingleAntigenVaccineGroup.Status's own doc comment for that second, necessary fix.
             var representativeSeries = bestSeries
-                .OrderBy(s => s.SeriesType == SeriesType.Standard ? 0 : 1)
+                .Select(s => (Series: s, Member: members.First(m => m.Series == s)))
+                .OrderBy(x => x.Series.SeriesType == SeriesType.Standard ? 0 : 1)
+                .ThenBy(x => x.Member.Forecast.Status == PatientSeriesStatus.AgedOut ? 1 : 0)
+                .Select(x => x.Series)
                 .FirstOrDefault();
             if (representativeSeries is not null)
             {

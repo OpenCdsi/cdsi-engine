@@ -61,23 +61,44 @@ public static class SingleAntigenVaccineGroup
     /// <summary>
     /// SINGLEANTVG-1: the vaccine group's status is its contained forecast's patient series
     /// status. §8.8 can legitimately produce MORE than one "best patient series" for the same
-    /// single antigen - discovered running the real, full 30-antigen catalog, not a hypothetical:
-    /// a newborn's very first antigen produced two best series with genuinely DIFFERENT statuses
-    /// (NotComplete and NotRecommended), not just redundant agreement. SINGLEANTVG-1's own text
-    /// ("the patient series status of THE patient series forecast," singular) doesn't address
-    /// this combination at all.
+    /// single antigen. SINGLEANTVG-1's own text ("the patient series status of THE patient
+    /// series forecast," singular) doesn't address this combination at all.
     ///
-    /// INFERENCE, not spec-grounded, reasoned from what's clinically sound rather than reused
-    /// unmodified from Table 9-4: multiple series GROUPS for one antigen are ALTERNATIVE paths
-    /// to protecting that antigen, not independent requirements the way multiple ANTIGENS in a
-    /// multi-antigen vaccine group are (where "worst status dominates" correctly reflects that
-    /// every antigen must be addressed). If ANY alternative path is actively actionable
-    /// (NotComplete - a dose is genuinely due via that path), that's the meaningful signal to
-    /// report; reporting some other contained status instead would hide a real recommendation
-    /// behind a differently-pathed non-recommendation. Only when no contained status is
-    /// NotComplete - every path is already resolved or blocked - does this fall back to
-    /// MultipleAntigenVaccineGroup's own worst-case cascade, since at that point there's no
-    /// actionable path being hidden and a conservative, safety-first default is appropriate.
+    /// INFERENCE, not spec-grounded. First written to stop a genuine crash (this class's own
+    /// earlier design threw on any disagreement) found running Cdsi.Demo's newborn sample
+    /// patient against the full 30-antigen catalog, BEFORE the real conformance corpus was even
+    /// wired in - resolved by reasoning about which contained status seemed most clinically
+    /// meaningful, WITHOUT ever identifying which antigen was involved or verifying the outcome
+    /// against a known-correct answer. Worth being explicit about that origin, since it's part of
+    /// why the ordering below was revisited and changed once real, verified corpus evidence
+    /// became available - the original NotComplete-first preference was reasonable AT THE TIME,
+    /// but had never actually been checked against a real expected outcome.
+    ///
+    /// EXTENDED, then REORDERED, against two real, verified corpus cases:
+    /// - 2024-0056 (RSV, 75-year-old, one Arexvy dose): "RSV 1-dose series" comes back AgedOut
+    ///   (genuinely not meant for this patient - the dose itself flagged "Inadvertent
+    ///   Administration"), "RSV 75 years+ 1-dose series" comes back Complete (this patient
+    ///   genuinely finished this real, applicable path). Added Complete as a second preference,
+    ///   checked after NotComplete at the time, and confirmed via real execution that this fixed
+    ///   the case.
+    /// - 2013-0578 (Pneumococcal, one PCV20 dose at 24 months, real corpus says series complete):
+    ///   found immediately after, real execution showed this STILL failed - "Pneumococcal start
+    ///   at 24 months series" comes back Complete (correct, genuinely applicable to this patient),
+    ///   but "Pneumococcal 50+ 1-dose PCV series" ALSO wins §8.8 despite being entirely
+    ///   inapplicable (its own dose flagged "Too young"), and its NotComplete status was being
+    ///   checked FIRST, hiding the genuine Complete result. The exact same underlying problem as
+    ///   AgedOut and NotComplete/NotRecommended above: a contained status from a structurally
+    ///   inapplicable series shouldn't override a genuine, resolved signal from an applicable one
+    ///   - it just turns out NotComplete can ALSO come from an inapplicable series, not only
+    ///   AgedOut, so checking it first was itself the remaining bug.
+    ///
+    /// Reordered accordingly: Complete is now checked FIRST, before NotComplete - a genuine,
+    /// definitive completion via a real applicable path is the strongest signal available, and
+    /// checking it first means it can no longer be hidden by a NotComplete (or any other status)
+    /// from a differently-pathed, inapplicable series. Only when NEITHER Complete nor NotComplete
+    /// appears among the contained statuses - every alternative path is aged out, immune,
+    /// contraindicated, or not recommended, with nothing resolved or actionable to report - does
+    /// this fall back to MultipleAntigenVaccineGroup's own worst-case cascade.
     /// </summary>
     public static PatientSeriesStatus Status(IReadOnlyList<PatientSeriesStatus> containedStatuses)
     {
@@ -85,6 +106,10 @@ public static class SingleAntigenVaccineGroup
         if (distinct.Length == 1)
         {
             return distinct[0];
+        }
+        if (distinct.Contains(PatientSeriesStatus.Complete))
+        {
+            return PatientSeriesStatus.Complete;
         }
         if (distinct.Contains(PatientSeriesStatus.NotComplete))
         {

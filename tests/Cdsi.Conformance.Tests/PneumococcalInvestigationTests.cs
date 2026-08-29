@@ -147,4 +147,83 @@ public class PneumococcalInvestigationTests : IClassFixture<ReferenceDataFixture
 
         Assert.True(false, $"Relevant series count={relevantSeries.Length} || {perSeriesDump} || BEST: {bestNames}");
     }
+
+    [Fact]
+    public void Real_2013_0578_Dose1PCV20At24Months_NowCorrectlyComplete()
+    {
+        // Real verification, not a diagnostic - confirms the SingleAntigenVaccineGroup.Status
+        // reordering fix (Complete now checked before NotComplete - see its own doc comment for
+        // the full derivation, including why this exact case is what proved the fix necessary)
+        // directly against this exact real corpus case before trusting it against the full
+        // 1,064-case corpus. The corpus's own expected result: Pneumococcal seriesStatus Complete.
+        var repo = _fixture.Repository;
+
+        var patient = new Patient { PatientId = "diag-2013-0578-verify", DateOfBirth = new DateOnly(2024, 8, 5) };
+        var assessmentDate = new DateOnly(2026, 8, 5);
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "216", DateAdministered = new DateOnly(2026, 8, 5) }
+        };
+
+        var fullResult = GeneratePatientForecast.ExecuteWithDoseDetail(
+            patient, doses, repo.AllSeries, repo.Schedule, repo.VaccineGroups,
+            repo.ImmunityByAntigen, repo.ContraindicationsByAntigen, assessmentDate);
+        var pcvGroup = fullResult.VaccineGroupForecasts.SingleOrDefault(g => g.VaccineGroupName.Trim() == "Pneumococcal");
+
+        Assert.NotNull(pcvGroup);
+        Assert.Equal(PatientSeriesStatus.Complete, pcvGroup!.Status);
+    }
+
+    [Fact]
+    public void DiagnosticOnly_2013_0578_Dose1PCV20At24Months_WhySeriesStatusNotComplete()
+    {
+        // DIAGNOSTIC, not a fix - kept as the record of how this was found. Confirmed by real
+        // execution: the SAME multi-winner shape as before, hitting the pre-this-session
+        // NotComplete-first preference in SingleAntigenVaccineGroup.Status. "Pneumococcal start
+        // at 24 months series" (genuinely applicable, correctly Complete) and "Pneumococcal 50+
+        // 1-dose PCV series" (entirely inapplicable to a 2-year-old, its own dose flagged "Too
+        // young") both win §8.8 for this patient - and the existing NotComplete-first rule picked
+        // the inapplicable one's status over the applicable one's genuine completion. Traced back
+        // to the newborn sample-patient origin of that original rule (not a verified conformance
+        // case - a Cdsi.Demo run, resolved by reasoning alone before the real corpus existed) -
+        // see SingleAntigenVaccineGroup.Status's own doc comment for the full history and the fix
+        // (Complete now checked first).
+        var repo = _fixture.Repository;
+
+        var patient = new Patient { PatientId = "diag-2013-0578", DateOfBirth = new DateOnly(2024, 8, 5) };
+        var assessmentDate = new DateOnly(2026, 8, 5);
+        var doses = new[]
+        {
+            new VaccineDoseAdministered { DoseId = "d1", Cvx = "216", DateAdministered = new DateOnly(2026, 8, 5) }
+        };
+
+        var relevantSeries = CreateRelevantPatientSeries.Execute(patient, repo.AllSeries, assessmentDate).RelevantSeries
+            .Where(s => s.Antigen == "Pneumococcal").ToArray();
+
+        var antigenRecords = OrganizeImmunizationHistory.Execute(patient, doses, repo.Schedule.CvxToAntigen);
+        var records = antigenRecords.Where(r => r.Antigen == "Pneumococcal").OrderBy(r => r.DateAdministered).ToArray();
+        bool NoCompletedSeries(string? _) => false;
+
+        var members = new List<SeriesGroupMember>();
+        var perSeriesDump = new System.Text.StringBuilder();
+        foreach (var series in relevantSeries)
+        {
+            var history = EvaluateSeriesHistory.Execute(
+                patient, series, records, Array.Empty<EvaluatedAntigenDose>(),
+                repo.Schedule.ConflictsByImpactedCvx, NoCompletedSeries, assessmentDate);
+            var forecast = GeneratePatientSeriesForecast.Execute(
+                patient, series, history, assessmentDate,
+                repo.ImmunityByAntigen["Pneumococcal"], repo.ContraindicationsByAntigen["Pneumococcal"],
+                Array.Empty<PriorVaccineDoseAdministered>(), repo.Schedule.ConflictsByImpactedCvx, NoCompletedSeries);
+            members.Add(new SeriesGroupMember(series, history, forecast));
+
+            var doseResultReasons = string.Join(",", history.DoseResults.Select(r => $"{r.Result.TargetDoseStatus}/{r.Result.EvaluationStatus}/{r.Result.Reason}"));
+            perSeriesDump.Append($"[{series.SeriesName}: SeriesType={series.SeriesType} Status={forecast.Status} CurrentTargetDoseNumber={history.CurrentTargetDoseNumber} DoseResults=({doseResultReasons})] ");
+        }
+
+        var best = DetermineBestPatientSeriesForAntigen.Execute(members, patient.DateOfBirth, assessmentDate);
+        var bestNames = string.Join(", ", best.Select(s => $"{s.SeriesName} (Status={members.First(m => m.Series == s).Forecast.Status})"));
+
+        Assert.True(false, $"Relevant series count={relevantSeries.Length} || {perSeriesDump} || BEST: {bestNames}");
+    }
 }
