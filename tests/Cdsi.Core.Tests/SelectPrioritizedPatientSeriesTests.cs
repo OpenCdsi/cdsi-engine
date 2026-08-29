@@ -87,11 +87,15 @@ public class SelectPrioritizedPatientSeriesTests
     }
 
     [Fact]
-    public void TiedScoreAndTiedPreference_NoSingleWinner_ReturnsNull()
+    public void TiedScoreAndTiedPreference_DeterministicFallbackByName()
     {
         // Two distinct series, contrived to share the same score AND the same seriesPreference
         // value (impossible within one real series group, but the function doesn't assume
-        // uniqueness - it should still resolve to "no winner" rather than pick arbitrarily).
+        // uniqueness). REVISED after a real bug was found and fixed here (see this class's own
+        // doc comment): §8.8's own precondition requires exactly one winner per group, so a tie
+        // surviving both the score comparison and the seriesPreference comparison now falls back
+        // to a deterministic choice (ordered by series name) rather than giving up with null -
+        // the previous version of this test asserted the old, now-corrected "give up" behavior.
         var a = SeriesNamed("HepB 3-dose series");           // preference 1
         var b = SeriesNamed("HepB risk 3-dose series");       // different group, preference 1 too
 
@@ -101,6 +105,29 @@ public class SelectPrioritizedPatientSeriesTests
             new ScoredPatientSeries(b, 5)
         });
 
-        Assert.Null(result);
+        Assert.Equal(a, result); // "HepB 3-dose series" sorts before "HepB risk 3-dose series" (ordinal: '3' < 'r')
+    }
+
+    [Fact]
+    public void TiedScore_NoTiedCandidateHasAnyPreference_DeterministicFallbackByName()
+    {
+        // The real bug this class's own doc comment describes, reconstructed directly with the
+        // exact real data that caused it: real corpus case 2024-0032 (MenB, 4 tied "Shared
+        // Clinical Decision Making" series, none with a seriesPreference at all - confirmed real
+        // data, all 6 real Meningococcal B series have seriesPreference=None) used to return
+        // null here, cascading silently all the way up to the entire Meningococcal B vaccine
+        // group vanishing from the final forecast output.
+        var meningococcalBSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Meningococcal_B-508.xml"));
+        var seriesWithoutPreference1 = meningococcalBSeries.Single(s => s.SeriesName == "Meningococcal B 2-dose series MenB-4C Shared Clinical Decision Making");
+        var seriesWithoutPreference2 = meningococcalBSeries.Single(s => s.SeriesName == "Meningococcal B 2-dose series MenB-FHbp Shared Clinical Decision Making");
+
+        var result = SelectPrioritizedPatientSeries.Execute(new[]
+        {
+            new ScoredPatientSeries(seriesWithoutPreference1, 5),
+            new ScoredPatientSeries(seriesWithoutPreference2, 5)
+        });
+
+        Assert.NotNull(result); // the real bug: this used to be null
+        Assert.Equal(seriesWithoutPreference1, result); // "...MenB-4C..." sorts before "...MenB-FHbp..." (ordinal: '4' < 'F')
     }
 }

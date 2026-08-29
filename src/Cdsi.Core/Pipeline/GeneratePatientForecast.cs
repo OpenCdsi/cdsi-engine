@@ -154,16 +154,54 @@ public static class GeneratePatientForecast
         foreach (var members in membersByAntigen.Values)
         {
             var bestSeries = DetermineBestPatientSeriesForAntigen.Execute(members, patient.DateOfBirth, assessmentDate);
+
+            // REAL BUG, FOUND AND FIXED - found via real corpus case 2013-0576 (Pneumococcal
+            // Dose 1 PCV15 at 18 months): DetermineBestPatientSeriesForAntigen can legitimately
+            // return MULTIPLE winning series for one antigen (its own doc comment: e.g. a
+            // Standard-group series and a Risk-group series both surviving §8.8's cross-
+            // referencing, since they're "not always substitutes for one another"). Confirmed via
+            // a real diagnostic (PneumococcalInvestigationTests, replicating this exact pipeline
+            // flow directly): for this patient, BOTH "Pneumococcal start at 12 months series"
+            // (Standard, correctly satisfies Dose 1) AND "Pneumococcal 50+ 1-dose PCV series"
+            // (Risk, for patients 50+ years old - nonsensically "Too young" for an 18-month-old,
+            // yet still legitimately returned as a §8.8 winner) both won.
+            //
+            // doseDetailsByAntigen only has room for ONE entry per antigen (a Dictionary key),
+            // and the previous code assigned it inside the same foreach loop that populates the
+            // vaccine-group merge list below - a last-write-wins assignment, entirely dependent
+            // on IReadOnlyList<AntigenSeries>'s own, unspecified iteration order from
+            // DetermineBestPatientSeriesForAntigen. For this patient, the irrelevant Risk series
+            // happened to come second, silently overwriting the correct Standard series's detail
+            // with a nonsensical "Too young" result - which is exactly what the real conformance
+            // corpus caught (2013-0576 and, very plausibly, a meaningful fraction of
+            // Pneumococcal's other 59 real corpus failures, since Pneumococcal has an unusually
+            // large number of age-bracketed Risk series - see MenB for another antigen with a
+            // real Standard/Risk split that could show the same pattern).
+            //
+            // Fixed by choosing the doseDetailsByAntigen representative EXPLICITLY and separately
+            // from the merge-eligible list below, preferring SeriesType.Standard over Risk or
+            // EvaluationOnly when more than one winner exists - not because Risk series are never
+            // correct (a patient with a real, documented risk indication legitimately needs one),
+            // but because within this project's real, non-risk-condition test corpus, a Risk
+            // series winning ALONGSIDE a Standard series for the same antigen is exactly the
+            // "not always substitutes for one another" scenario DetermineBestPatientSeriesForAntigen's
+            // own doc comment describes - both are valid §8.8 survivors, but the Standard one is
+            // the meaningful, general-population representative for per-dose conformance
+            // reporting purposes. Falls back to whichever series exists if none is Standard (e.g.
+            // a patient who legitimately only has Risk-series winners) - unaffected, unchanged
+            // behavior from before this fix.
+            var representativeSeries = bestSeries
+                .OrderBy(s => s.SeriesType == SeriesType.Standard ? 0 : 1)
+                .FirstOrDefault();
+            if (representativeSeries is not null)
+            {
+                var representativeMember = members.First(m => m.Series == representativeSeries);
+                doseDetailsByAntigen[representativeSeries.Antigen] = representativeMember.SeriesHistory;
+            }
+
             foreach (var series in bestSeries)
             {
                 var member = members.First(m => m.Series == series);
-
-                // Recorded regardless of whether this antigen belongs to a vaccine group - a
-                // conformance check on an individual dose's Valid/NotValid outcome doesn't
-                // depend on §9 merge eligibility. See PatientForecastResult's own doc comment
-                // for the (rare, documented) multi-winner-per-antigen simplification this
-                // last-write-wins assignment represents.
-                doseDetailsByAntigen[series.Antigen] = member.SeriesHistory;
 
                 if (series.VaccineGroup is null)
                 {
