@@ -12,7 +12,7 @@ public class ResolveCompletedSeriesGroupsTests
 {
     // Real data: two of HepB's own series, one per real series group.
     private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     private static AntigenSeries StandardSeries => HepBSeries.Single(s => s.SeriesName == "HepB 3-dose series"); // group "1"
     private static AntigenSeries RiskSeries => HepBSeries.Single(s => s.SeriesName == "HepB risk Dialysis 4-dose series"); // group "2"

@@ -19,7 +19,7 @@ namespace Cdsi.Core.Tests;
 public class EvaluateSeriesHistoryTests
 {
     private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     private static readonly ScheduleSupportingData Schedule =
         ScheduleSupportingDataLoader.LoadFile(TestPaths.ScheduleFilePath);
@@ -146,7 +146,7 @@ public class EvaluateSeriesHistoryTests
         // "10 years", no age gate). Wrapped as a synthetic 2-dose series (real Dose 10 + Dose 11
         // objects, extracted directly from the loaded file) so this exercises the real
         // reference data without needing all 11 real doses satisfied first.
-        var tetanusSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Tetanus-508.xml"))
+        var tetanusSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Tetanus"))
             .Single(s => s.SeriesName == "Tetanus standard series");
         var dose10 = tetanusSeries.SeriesDoses.Single(d => d.DoseNumber == 10);
         var dose11 = tetanusSeries.SeriesDoses.Single(d => d.DoseNumber == 11);
@@ -244,7 +244,7 @@ public class EvaluateSeriesHistoryTests
         // valid doses (none apply to a zero-dose patient) and whose own age window (minAge:
         // 7 years, confirmed identical on this series and the "start at 12 months" alternate) is
         // exactly the real, intended, age-anchored recommendation.
-        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series");
 
         var dob = new DateOnly(2019, 1, 1);
@@ -289,7 +289,7 @@ public class EvaluateSeriesHistoryTests
         // corpus - this test only confirms that Pertussis in isolation reaches the right target
         // dose; the real explanation is now believed to live in Diphtheria/Tetanus behaving
         // differently, or in the multi-antigen merge, not in anything this class does.
-        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series");
 
         var dob = new DateOnly(1995, 8, 5);
@@ -329,7 +329,7 @@ public class EvaluateSeriesHistoryTests
         // patient via its own ordinary within-loop skip mechanics, or does §7.6's re-forecast
         // loop need to intervene here the same way it did for 2020-0004? This determines whether
         // Option 2 even needs to fire for this specific case.
-        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series");
 
         var dob = new DateOnly(2019, 7, 5);
@@ -367,7 +367,7 @@ public class EvaluateSeriesHistoryTests
         // breaking this exact case). Rather than keep guessing, dumping AllEvaluatedDoses's real
         // contents directly - CVX, date, status, and which target dose each satisfied - to get
         // the precise, real answer.
-        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series");
 
         var dob = new DateOnly(2019, 7, 5);
@@ -412,7 +412,7 @@ public class EvaluateSeriesHistoryTests
         // multi-antigen merge picking their later date over Pertussis's stuck-at-Dose-8 one.
         // Checking Tetanus (identical Dose 7/8/9 structure to Pertussis, already confirmed
         // earlier in this investigation) with the same real patient data to see if this holds.
-        var tetanusSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Tetanus-508.xml"))
+        var tetanusSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Tetanus"))
             .Single(s => s.SeriesName == "Tetanus standard series");
 
         var dob = new DateOnly(2019, 7, 5);

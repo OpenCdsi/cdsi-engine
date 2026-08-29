@@ -11,10 +11,10 @@ namespace Cdsi.Core.Tests;
 public class EvaluateAgeTests
 {
     private static readonly IReadOnlyList<AntigenSeries> HpvSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HPV-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HPV"));
 
     private static readonly IReadOnlyList<AntigenSeries> CovidSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_COVID-19-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("COVID-19"));
 
     // Real data: HPV 2-dose series, Dose 1 — absMinAge "9 years - 4 days", minAge "9 years",
     // maxAge "46 years", single unversioned age rule. Exercises all four Table 6-15 branches

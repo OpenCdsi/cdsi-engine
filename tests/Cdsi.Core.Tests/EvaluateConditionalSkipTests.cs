@@ -11,13 +11,13 @@ namespace Cdsi.Core.Tests;
 public class EvaluateConditionalSkipTests
 {
     private static readonly IReadOnlyList<AntigenSeries> HibSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Hib-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Hib"));
 
     private static readonly IReadOnlyList<AntigenSeries> RabiesSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Rabies-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Rabies"));
 
     private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     private static readonly Func<string?, bool> NoCompletedSeriesExpected =
         _ => throw new InvalidOperationException("Test fixture shouldn't reach a Completed Series condition.");

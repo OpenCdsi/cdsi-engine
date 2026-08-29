@@ -16,7 +16,7 @@ public class DetermineBestPatientSeriesForAntigenTests
     // most series equivalent="1"). "HepB 3-dose series" (group 1) <-> "HepB risk 3-dose series"
     // (group 2) is a clean, real bidirectional equivalence pair.
     private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     private static AntigenSeries SeriesNamed(string name) => HepBSeries.Single(s => s.SeriesName == name);
 

@@ -15,12 +15,12 @@ public class EvaluateEvidenceOfImmunityTests
     // NO birthCountry restriction, exclusion "055" (Health care personnel). This is the spec's
     // own worked example antigen.
     private static readonly AntigenImmunityData MeaslesImmunity =
-        AntigenSupportingDataLoader.LoadImmunityData(TestPaths.AntigenFile("AntigenSupportingData-_Measles-508.xml"));
+        AntigenSupportingDataLoader.LoadImmunityData(TestPaths.AntigenFile("Measles"));
 
     // Real data: Varicella - three clinicalHistory guidelines ("023","024","025"), dateOfBirth
     // rule "01/01/1980" WITH birthCountry "U.S." restriction, three exclusions ("055","007","003").
     private static readonly AntigenImmunityData VaricellaImmunity =
-        AntigenSupportingDataLoader.LoadImmunityData(TestPaths.AntigenFile("AntigenSupportingData-_Varicella-508.xml"));
+        AntigenSupportingDataLoader.LoadImmunityData(TestPaths.AntigenFile("Varicella"));
 
     private static Patient MakePatient(DateOnly dob, string? countryOfBirth = null, IReadOnlyList<PatientObservation>? observations = null) => new()
     {

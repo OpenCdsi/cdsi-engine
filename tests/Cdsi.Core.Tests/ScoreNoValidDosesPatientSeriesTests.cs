@@ -88,7 +88,7 @@ public class ScoreNoValidDosesPatientSeriesTests
         // both are productPath "No", so condition 3 is equal between them, cleanly isolating
         // condition 1's (start-date) contribution. Recombivax is productPath "Yes", which would
         // otherwise muddy a direct score comparison with a second condition's difference.
-        var group2 = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"))
+        var group2 = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"))
             .Where(s => s.SeriesGroupInfo.SeriesGroup == "2")
             .ToArray();
         var dob = new DateOnly(2000, 1, 1);

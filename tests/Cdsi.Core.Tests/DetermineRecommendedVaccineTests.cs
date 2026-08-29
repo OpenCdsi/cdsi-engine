@@ -13,13 +13,13 @@ public class DetermineRecommendedVaccineTests
     // Real data: "HepB adolescent 2-dose series" Dose 1 - CVX 43, forecastVaccineType "Y",
     // no age gate at all (unbounded).
     private static PreferableVaccine HepBUnbounded =>
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"))
             .Single(s => s.SeriesName == "HepB adolescent 2-dose series")
             .SeriesDoses.Single(d => d.DoseNumber == 1).PreferableVaccines.Single(pv => pv.Cvx == "43");
 
     // Real data: "Dengue risk 3-dose series" Dose 1 - CVX 56, forecastVaccineType "N".
     private static PreferableVaccine DengueNotForecastEligible =>
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Dengue-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Dengue"))
             .Single(s => s.SeriesName == "Dengue risk 3-dose series")
             .SeriesDoses.Single(d => d.DoseNumber == 1).PreferableVaccines.Single(pv => pv.Cvx == "56");
 
@@ -27,7 +27,7 @@ public class DetermineRecommendedVaccineTests
     // "Y", real age window [10 years, 26 years). This dose has 2 preferableVaccine entries in
     // real data, so filter by CVX explicitly rather than assuming a single entry.
     private static PreferableVaccine MenBAgeGated =>
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Meningococcal_B-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Meningococcal B"))
             .Single(s => s.SeriesName == "Meningococcal B 3-dose series MenB-4C Shared Clinical Decision Making")
             .SeriesDoses.Single(d => d.DoseNumber == 3).PreferableVaccines.Single(pv => pv.Cvx == "328");
 

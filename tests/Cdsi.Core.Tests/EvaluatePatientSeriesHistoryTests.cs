@@ -22,10 +22,10 @@ public class EvaluatePatientSeriesHistoryTests
         ScheduleSupportingDataLoader.LoadFile(TestPaths.ScheduleFilePath);
 
     private static readonly IReadOnlyList<AntigenSeries> MeaslesSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Measles-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Measles"));
 
     private static readonly IReadOnlyList<AntigenSeries> VaricellaSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Varicella-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Varicella"));
 
     private static readonly Func<string, string?, bool> NoCompletedSeriesExpected =
         (_, _) => throw new InvalidOperationException("Test fixture shouldn't reach a Completed Series condition.");
@@ -101,7 +101,7 @@ public class EvaluatePatientSeriesHistoryTests
         // may be 'not valid' for a different relevant patient series for the same patient."
         // Evaluate against two DIFFERENT real HepB series with the same raw administered doses,
         // and confirm each produces its own independent SeriesHistoryResult (not shared state).
-        var hepBSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        var hepBSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
         var threeDoseSeries = hepBSeries.Single(s => s.SeriesName == "HepB 3-dose series");
         var heplisavSeries = hepBSeries.Single(s => s.SeriesName == "HepB Heplisav-B 2-dose series");
 
@@ -134,7 +134,7 @@ public class EvaluatePatientSeriesHistoryTests
         // group "1") - it should become skippable once the patient has genuinely completed
         // "HepB 3-dose series" (the real group "1" Standard series), mirroring exactly the
         // two-pass mechanism GeneratePatientForecast runs for real.
-        var hepBSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        var hepBSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
         var standardSeries = hepBSeries.Single(s => s.SeriesName == "HepB 3-dose series");
         var dialysisSeries = hepBSeries.Single(s => s.SeriesName == "HepB risk Dialysis 4-dose series");
 

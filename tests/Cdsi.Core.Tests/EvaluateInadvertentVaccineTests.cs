@@ -11,7 +11,7 @@ namespace Cdsi.Core.Tests;
 public class EvaluateInadvertentVaccineTests
 {
     private static readonly IReadOnlyList<AntigenSeries> PolioSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Polio-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Polio"));
 
     // Real data: "Polio 4-dose series" Dose 1 lists three inadvertent CVX codes -
     // 178 (OPV bivalent), 179 (OPV monovalent unspecified), 182 (OPV unspecified).

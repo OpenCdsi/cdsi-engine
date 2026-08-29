@@ -13,7 +13,7 @@ public class PreFilterPatientSeriesTests
     // Real data: HepB series group "2" ("Increased Risk") has 8 Risk-type series with a genuine
     // priority mix - 6 at "B", 2 at "A" (Dialysis, Recombivax).
     private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     private static IReadOnlyList<AntigenSeries> Group2RiskSeries =>
         HepBSeries.Where(s => s.SeriesGroupInfo.SeriesGroup == "2").ToArray();
@@ -21,7 +21,7 @@ public class PreFilterPatientSeriesTests
     private static AntigenSeries HepB3Dose => HepBSeries.Single(s => s.SeriesName == "HepB 3-dose series");
 
     private static readonly AntigenSeries HepAEvaluationOnly =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepA-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepA"))
             .Single(s => s.SeriesName == "HepA risk Twinrix tertiary 3-dose series");
 
     private static ScorableSeriesCandidate MakeCandidate(AntigenSeries series, bool contraindicated = false,

@@ -14,12 +14,12 @@ public class EvaluateContraindicationsTests
     // Real data: Measles antigen-level contraindications include "007" (Pregnant, no age gate)
     // and "091" (Severe allergic reaction after previous dose of Measles).
     private static readonly AntigenContraindicationData MeaslesContraindications =
-        AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("AntigenSupportingData-_Measles-508.xml"));
+        AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("Measles"));
 
     // Real data: RSV has exactly one age-gated antigen-level contraindication - "278" (Birth
     // mother received RSV vaccine during pregnancy), beginAge "0 days", endAge "8 months".
     private static readonly AntigenContraindicationData RsvContraindications =
-        AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("AntigenSupportingData-_RSV-508.xml"));
+        AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("RSV"));
 
     // Real data: Measles vaccine-level contraindication "089" (Severe allergic reaction after
     // previous dose of Varicella) -> contraindicatedVaccine CVX "94" (MMRV, which includes the

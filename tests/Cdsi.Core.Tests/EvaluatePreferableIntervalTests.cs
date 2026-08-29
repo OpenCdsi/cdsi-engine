@@ -11,7 +11,7 @@ namespace Cdsi.Core.Tests;
 public class EvaluatePreferableIntervalTests
 {
     private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     // Real data: "HepB 3-dose series" Dose 3 - two interval groups that must BOTH be satisfied:
     //   fromPrevious:              absMinInt "8 weeks - 4 days", minInt "8 weeks"

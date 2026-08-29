@@ -12,10 +12,10 @@ namespace Cdsi.Core.Tests;
 public class CreateRelevantPatientSeriesTests
 {
     private static readonly IReadOnlyList<AntigenSeries> HibSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Hib-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Hib"));
 
     private static readonly IReadOnlyList<AntigenSeries> HpvSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HPV-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HPV"));
 
     // Real series from the Hib file: "Hib risk child 2-dose series", Risk type,
     // indication observationCode 146, beginAge 12 months, endAge 5 years.

@@ -14,7 +14,7 @@ public class ForecastIntervalDatesTests
     //   fromPrevious:            minInt "8 weeks", earliestRecInt "8 weeks", latestRecInt "18 months + 4 weeks"
     //   fromTargetDose (Dose 1): minInt "16 weeks", earliestRecInt/latestRecInt both EMPTY
     private static IReadOnlyList<PreferableIntervalRule> HepBDose3Intervals =>
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"))
             .Single(s => s.SeriesName == "HepB 3-dose series")
             .SeriesDoses.Single(d => d.DoseNumber == 3).PreferableIntervals;
 
@@ -83,7 +83,7 @@ public class ForecastIntervalDatesTests
         // behavior on real HepB data above - produce 2026-08-05 + 4 weeks = 2026-09-02. If this
         // comes back anything else, the bug is genuinely inside this function or how Dose 8's own
         // PreferableIntervals load from the real XML, not in the re-forecast loop or the merge.
-        var pertussisDose8Intervals = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        var pertussisDose8Intervals = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series")
             .SeriesDoses.Single(d => d.DoseNumber == 8).PreferableIntervals;
 

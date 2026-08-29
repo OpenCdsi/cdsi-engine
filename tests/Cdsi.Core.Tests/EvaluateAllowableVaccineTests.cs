@@ -11,7 +11,7 @@ namespace Cdsi.Core.Tests;
 public class EvaluateAllowableVaccineTests
 {
     private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     // Real data: "HepB 3-dose series" Dose 1 includes CVX 08 (Hep B, Adol/peds),
     // beginAge "0 days", endAge "20 years", among several allowable vaccine entries.

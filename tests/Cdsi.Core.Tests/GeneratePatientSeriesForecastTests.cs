@@ -20,14 +20,14 @@ public class GeneratePatientSeriesForecastTests
         ScheduleSupportingDataLoader.LoadFile(TestPaths.ScheduleFilePath);
 
     private static readonly AntigenSeries HepB3DoseSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"))
             .Single(s => s.SeriesName == "HepB 3-dose series");
 
     private static readonly AntigenImmunityData HepBImmunity =
-        AntigenSupportingDataLoader.LoadImmunityData(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadImmunityData(TestPaths.AntigenFile("HepB"));
 
     private static readonly AntigenContraindicationData HepBContraindications =
-        AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("HepB"));
 
     private static readonly Func<string?, bool> NoCompletedSeriesExpected =
         _ => throw new InvalidOperationException("Test fixture shouldn't reach a Completed Series condition.");
@@ -145,7 +145,7 @@ public class GeneratePatientSeriesForecastTests
         // real per-dose data becomes the (only) current target dose without needing a full 3-dose
         // administered history built up first - a deliberately engineered fixture reusing real
         // reference data, not a claim that a 1-dose "series" is realistic.
-        var realDose3 = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Meningococcal_B-508.xml"))
+        var realDose3 = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Meningococcal B"))
             .Single(s => s.SeriesName == "Meningococcal B 3-dose series MenB-4C Shared Clinical Decision Making")
             .SeriesDoses.Single(d => d.DoseNumber == 3);
 
@@ -187,7 +187,7 @@ public class GeneratePatientSeriesForecastTests
         // EarliestDate would resolve to that old minAgeDate - the conflict, once wired through
         // priorDosesAllAntigens, should dominate the MAX() instead and push it out to just after
         // the conflict clears.
-        var varicellaSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Varicella-508.xml"))
+        var varicellaSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Varicella"))
             .Single(s => s.SeriesName == "Varicella childhood 2-dose series");
 
         var dob = new DateOnly(2019, 1, 1); // age 5 at assessment
@@ -232,7 +232,7 @@ public class GeneratePatientSeriesForecastTests
         // CVX "230"), but reconstructing a full real dose history isn't needed to test this
         // specific extraction - a synthetic DoseResults entry with the real reason string,
         // against the same real Varicella fixture used above, isolates just this piece.
-        var varicellaSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Varicella-508.xml"))
+        var varicellaSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Varicella"))
             .Single(s => s.SeriesName == "Varicella childhood 2-dose series");
 
         var dob = new DateOnly(2019, 1, 1);
@@ -277,7 +277,7 @@ public class GeneratePatientSeriesForecastTests
         // MultipleAntigenVaccineGroup's own doc comment for why "override" is the value that
         // actually appears in real data). Pertussis genuinely belongs to the real multi-antigen
         // DTaP/Tdap/Td vaccine group, which is exactly the scenario this field exists to support.
-        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series");
 
         var dob = new DateOnly(2024, 1, 1);
@@ -353,7 +353,7 @@ public class GeneratePatientSeriesForecastTests
         // Forecast-context skip condition of its own, and whose "fromPrevious" interval
         // correctly references the real previous ADMINISTERED dose (Dose 2, since Dose 3 was
         // never actually given, only forecasted and rejected).
-        var hibSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Hib-508.xml"))
+        var hibSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Hib"))
             .Single(s => s.SeriesName == "Hib start at 2 months 4-dose series");
 
         var dob = new DateOnly(2020, 1, 1);
@@ -395,7 +395,7 @@ public class GeneratePatientSeriesForecastTests
         // re-forecast loop still cascades to a wrong result on the current, reverted baseline.
         // The assertion intentionally checks against the corpus's own expected date (2026-09-02)
         // - if this fails, the failure message's "Actual:" value is the real, current answer.
-        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series");
         var emptyImmunity = new AntigenImmunityData { ClinicalHistoryGuidelines = Array.Empty<ImmunityClinicalHistoryGuideline>(), BirthDateRules = Array.Empty<ImmunityBirthDateRule>() };
         var emptyContraindications = new AntigenContraindicationData { AntigenLevel = Array.Empty<AntigenContraindication>(), VaccineLevel = Array.Empty<VaccineContraindication>() };
@@ -439,7 +439,7 @@ public class GeneratePatientSeriesForecastTests
         // unchanged regardless of where the loop starts), confirming all four converge on the
         // same wrong result - the finding that originally pointed at mostRecentAdministeredDate
         // and, from there, at the real root cause in ValidateRecommendation's own doseCount check.
-        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series");
         var emptyImmunity = new AntigenImmunityData { ClinicalHistoryGuidelines = Array.Empty<ImmunityClinicalHistoryGuideline>(), BirthDateRules = Array.Empty<ImmunityBirthDateRule>() };
         var emptyContraindications = new AntigenContraindicationData { AntigenLevel = Array.Empty<AntigenContraindication>(), VaccineLevel = Array.Empty<VaccineContraindication>() };
@@ -489,7 +489,7 @@ public class GeneratePatientSeriesForecastTests
         // whether it produces 2026-08-05 as expected or something else (null, wrong Status,
         // wrong count) that would explain why the real pipeline's forecast doesn't match this
         // function's own already-confirmed-correct behavior.
-        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series");
 
         var dob = new DateOnly(1995, 8, 5);
@@ -549,7 +549,7 @@ public class GeneratePatientSeriesForecastTests
         // genuine, much-earlier age-based date. If Dose 10/11 come back as 2026-08-05 here, that
         // confirms mostRecentAdministeredDate is the real, final piece of this bug - not the
         // loop's retry logic, which has checked out correct at every other point tested so far.
-        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        var pertussisSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series");
         var targetDose = pertussisSeries.SeriesDoses.Single(d => d.DoseNumber == doseNumber);
         var emptyImmunity = new AntigenImmunityData { ClinicalHistoryGuidelines = Array.Empty<ImmunityClinicalHistoryGuideline>(), BirthDateRules = Array.Empty<ImmunityBirthDateRule>() };

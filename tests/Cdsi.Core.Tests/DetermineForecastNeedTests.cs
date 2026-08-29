@@ -94,7 +94,7 @@ public class DetermineForecastNeedTests
     {
         // Real data: Influenza standard series, both doses share seasonalRecommendation
         // startDate 2025-07-01, endDate 2026-06-30.
-        var series = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Influenza-508.xml"))
+        var series = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Influenza"))
             .Single(s => s.SeriesName == "Influenza standard series");
         var dose1Seasonal = series.SeriesDoses.Single(d => d.DoseNumber == 1).SeasonalRecommendation;
         Assert.NotNull(dose1Seasonal);

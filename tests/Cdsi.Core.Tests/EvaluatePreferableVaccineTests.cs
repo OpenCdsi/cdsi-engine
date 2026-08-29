@@ -12,10 +12,10 @@ namespace Cdsi.Core.Tests;
 public class EvaluatePreferableVaccineTests
 {
     private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     private static readonly IReadOnlyList<AntigenSeries> DengueSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Dengue-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Dengue"));
 
     // Real data: "HepB adolescent 2-dose series" Dose 1 - single preferable vaccine,
     // CVX 43, tradeName "RECOMBIVAX ADULT", volume 1.0, no age bounds.

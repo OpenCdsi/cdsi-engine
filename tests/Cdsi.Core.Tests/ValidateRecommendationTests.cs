@@ -14,7 +14,7 @@ public class ValidateRecommendationTests
     // Dose 2 has a Forecast-context conditionalSkip instance with beginAge "15 months" exactly
     // (no grace period, unlike the Evaluation-context sibling instance).
     private static IReadOnlyList<ConditionalSkipInstance> HibDose2 =>
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Hib-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Hib"))
             .Single(s => s.SeriesName == "Hib start at 2 months 4-dose series")
             .SeriesDoses.Single(d => d.DoseNumber == 2).ConditionalSkipInstances;
 
@@ -79,7 +79,7 @@ public class ValidateRecommendationTests
         // in an earlier round) would retry past Dose 8 for this patient too - a real, distinct
         // mechanism from the reverted Dose 7 auto-satisfy assumption, and the leading candidate
         // for why 2020-0004/2020-0005 still don't match the corpus.
-        var pertussisDose8 = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        var pertussisDose8 = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series")
             .SeriesDoses.Single(d => d.DoseNumber == 8).ConditionalSkipInstances;
 
@@ -120,7 +120,7 @@ public class ValidateRecommendationTests
         // the immediately-prior target dose isn't meant to also count toward a LATER dose's own
         // "do you already have one of these" check, removing it here should flip this specific
         // skip from satisfied to not-satisfied.
-        var pertussisDose8 = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        var pertussisDose8 = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series")
             .SeriesDoses.Single(d => d.DoseNumber == 8).ConditionalSkipInstances;
 

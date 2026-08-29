@@ -14,7 +14,7 @@ public class SelectPrioritizedPatientSeriesForGroupTests
 {
     // Real data: HepB series group "1" ("Standard"), 10 series, seriesPreference 1-10.
     private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     private static AntigenSeries SeriesNamed(string name) => HepBSeries.Single(s => s.SeriesName == name);
 

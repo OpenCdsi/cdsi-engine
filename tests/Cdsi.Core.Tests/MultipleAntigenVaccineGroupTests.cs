@@ -13,13 +13,13 @@ public class MultipleAntigenVaccineGroupTests
     // Real data: "Pertussis standard series" Dose 2 (Pertussis belongs to the real multi-antigen
     // "DTaP/Tdap/Td" group) has exactly one preferable interval, intervalPriority "override".
     private static IReadOnlyList<PreferableIntervalRule> PertussisDose2Intervals =>
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Pertussis-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Pertussis"))
             .Single(s => s.SeriesName == "Pertussis standard series")
             .SeriesDoses.Single(d => d.DoseNumber == 2).PreferableIntervals;
 
     // Real data: "HepB 3-dose series" Dose 3's fromPrevious interval has no intervalPriority at all.
     private static IReadOnlyList<PreferableIntervalRule> HepBDose3Intervals =>
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"))
             .Single(s => s.SeriesName == "HepB 3-dose series")
             .SeriesDoses.Single(d => d.DoseNumber == 3).PreferableIntervals;
 

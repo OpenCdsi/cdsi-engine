@@ -14,24 +14,24 @@ public class GenerateForecastGuidanceTests
     // Real data: "HepB 3-dose series" has seriesAdminGuidance "Anyone age 60 years or older
     // who does not meet risk-based recommendations may still receive Hepatitis B vaccination."
     private static readonly AntigenSeries HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"))
             .Single(s => s.SeriesName == "HepB 3-dose series");
 
     // Real data: "Hib risk 1-dose series" has an indication (code "002") with guidance
     // "Vaccination 14 or more days before splenectomy is suggested."
     private static readonly AntigenSeries HibRiskSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Hib-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Hib"))
             .Single(s => s.SeriesName == "Hib risk 1-dose series");
 
     // Real data: Measles antigen-level contraindication "157" (Solid organ transplantation)
     // has real contraindicationGuidance text.
     private static readonly AntigenContraindicationData MeaslesContraindications =
-        AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("AntigenSupportingData-_Measles-508.xml"));
+        AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("Measles"));
 
     // Real data: Influenza vaccine-level contraindication "157" (also Solid organ
     // transplantation) has real contraindicationGuidance text too.
     private static readonly AntigenContraindicationData InfluenzaContraindications =
-        AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("AntigenSupportingData-_Influenza-508.xml"));
+        AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("Influenza"));
 
     private static Patient MakePatient(IReadOnlyList<PatientObservation>? observations = null) => new()
     {

@@ -11,7 +11,7 @@ namespace Cdsi.Core.Tests;
 public class EvaluateAllowableIntervalTests
 {
     private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     // Real data: "HepB 3-dose series" Dose 3 has NO allowableInterval rules at all (empty
     // placeholder in the source XML) - the exact case §6.6 says must default to "not valid".

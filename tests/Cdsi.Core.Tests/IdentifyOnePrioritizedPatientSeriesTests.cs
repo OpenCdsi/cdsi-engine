@@ -11,7 +11,7 @@ namespace Cdsi.Core.Tests;
 public class IdentifyOnePrioritizedPatientSeriesTests
 {
     private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     private static AntigenSeries SeriesNamed(string name) => HepBSeries.Single(s => s.SeriesName == name);
 

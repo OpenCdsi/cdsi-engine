@@ -13,15 +13,15 @@ public class DetermineBestPatientSeriesTests
     // Real data: HepB series group "1" is entirely SeriesType.Standard; group "2" is entirely
     // SeriesType.Risk. HepA has a real Evaluation Only series (used elsewhere in §8.1's tests).
     private static readonly SeriesType RealStandardType =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"))
             .Single(s => s.SeriesName == "HepB 3-dose series").SeriesType;
 
     private static readonly SeriesType RealRiskType =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"))
             .Single(s => s.SeriesName == "HepB risk 3-dose series").SeriesType;
 
     private static readonly SeriesType RealEvaluationOnlyType =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepA-508.xml"))
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepA"))
             .Single(s => s.SeriesName == "HepA risk Twinrix tertiary 3-dose series").SeriesType;
 
     [Fact]

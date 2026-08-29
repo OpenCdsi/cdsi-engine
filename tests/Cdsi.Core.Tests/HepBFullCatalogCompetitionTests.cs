@@ -39,18 +39,18 @@ public class HepBFullCatalogCompetitionTests
         ScheduleSupportingDataLoader.LoadFile(TestPaths.ScheduleFilePath);
 
     private static readonly IReadOnlyList<AntigenSeries> AllHepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     private static readonly IReadOnlyDictionary<string, AntigenImmunityData> ImmunityByAntigen =
         new Dictionary<string, AntigenImmunityData>
         {
-            ["HepB"] = AntigenSupportingDataLoader.LoadImmunityData(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"))
+            ["HepB"] = AntigenSupportingDataLoader.LoadImmunityData(TestPaths.AntigenFile("HepB"))
         };
 
     private static readonly IReadOnlyDictionary<string, AntigenContraindicationData> ContraindicationsByAntigen =
         new Dictionary<string, AntigenContraindicationData>
         {
-            ["HepB"] = AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"))
+            ["HepB"] = AntigenSupportingDataLoader.LoadContraindicationData(TestPaths.AntigenFile("HepB"))
         };
 
     private static Patient MakePatient(DateOnly dob) => new() { PatientId = "p1", DateOfBirth = dob };

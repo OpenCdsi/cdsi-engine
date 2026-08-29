@@ -13,7 +13,7 @@ public class SelectPrioritizedPatientSeriesTests
     // Real data: HepB series group "1" ("Standard") has 10 series with distinct seriesPreference
     // values 1 through 10 (1 = best/most preferred), in this exact order.
     private static readonly IReadOnlyList<AntigenSeries> HepBSeries =
-        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_HepB-508.xml"));
+        AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("HepB"));
 
     private static AntigenSeries SeriesNamed(string name) => HepBSeries.Single(s => s.SeriesName == name);
 
@@ -117,7 +117,7 @@ public class SelectPrioritizedPatientSeriesTests
         // data, all 6 real Meningococcal B series have seriesPreference=None) used to return
         // null here, cascading silently all the way up to the entire Meningococcal B vaccine
         // group vanishing from the final forecast output.
-        var meningococcalBSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("AntigenSupportingData-_Meningococcal_B-508.xml"));
+        var meningococcalBSeries = AntigenSupportingDataLoader.LoadFile(TestPaths.AntigenFile("Meningococcal B"));
         var seriesWithoutPreference1 = meningococcalBSeries.Single(s => s.SeriesName == "Meningococcal B 2-dose series MenB-4C Shared Clinical Decision Making");
         var seriesWithoutPreference2 = meningococcalBSeries.Single(s => s.SeriesName == "Meningococcal B 2-dose series MenB-FHbp Shared Clinical Decision Making");
 
