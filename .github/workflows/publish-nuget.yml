@@ -1,0 +1,91 @@
+# Publishes OpenCdsi.Core to GitHub Packages whenever a semver tag is pushed to main.
+#
+# Deliberately narrow in scope: this workflow only builds and publishes src/Cdsi.Core - the one
+# project actually meant for external, NuGet consumption (e.g. a .NET MAUI app referencing it).
+# Cdsi.Api/Cdsi.Functions/Cdsi.Demo and the reference data under data/ are not part of this -
+# they're deployed differently (see the repo's own Dockerfile/docker-compose.yml), and bundling
+# them into this package would contradict the project's own stated goal of keeping schedule data
+# externally updatable without a new package release (see Cdsi.Core.csproj's own comments).
+#
+# Two safety checks run BEFORE anything gets built or published, since a wrong version number or
+# a tag placed on the wrong branch is much harder to undo once a package is live on the registry
+# than it would be to catch here first:
+#   1. The tag itself must be a real, valid semver (with the "v" prefix this project's own
+#      convention uses - confirmed via the v1.2.0 tag already placed on main) - not just
+#      "looks vaguely like dots and numbers," which is all the workflow-level trigger filter
+#      below can check on its own.
+#   2. The tagged commit must actually be reachable from main - matching "add a new semver tag to
+#      the main branch" literally, not just "any tag anywhere in the repo, on any branch."
+#
+# The trigger pattern (v*.*.*) is deliberately permissive - GitHub Actions' own tag-filter glob
+# syntax can't express a real semver pattern - so the real validation happens in the "Validate
+# tag is real semver" step below, with a clear, specific failure message rather than a vague
+# build error if someone pushes something like "v1.2" or "version-1.2.0" by mistake.
+
+name: Publish OpenCdsi.Core to GitHub Packages
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history needed for the "is this tag reachable from main" check below
+
+      - name: Validate tag is real semver
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Full semver 2.0.0 pattern (semver.org's own regex), applied after stripping the
+          # required leading "v" - rejects things like "v1.2" or "v1.2.3.4" with a clear message
+          # rather than letting a malformed version reach `dotnet pack` and fail there instead.
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+([0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*))?$ ]]; then
+            echo "::error::Tag '$TAG' is not a valid semver tag (expected format: v1.2.3, with an optional -prerelease or +build suffix). Not publishing."
+            exit 1
+          fi
+          VERSION="${TAG#v}" # NuGet's own Version property doesn't take the "v" prefix
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Validated tag $TAG -> package version $VERSION"
+
+      - name: Verify tag is reachable from main
+        run: |
+          git fetch origin main --quiet
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::Tag ${GITHUB_REF_NAME} (commit ${GITHUB_SHA}) is not reachable from main. Refusing to publish a package from a tag that isn't actually on the main branch."
+            exit 1
+          fi
+          echo "Confirmed: ${GITHUB_REF_NAME} is reachable from main."
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore src/Cdsi.Core/Cdsi.Core.csproj
+
+      - name: Pack
+        run: >
+          dotnet pack src/Cdsi.Core/Cdsi.Core.csproj
+          -c Release
+          -o ./artifacts
+          -p:Version=${{ steps.version.outputs.version }}
+          --no-restore
+
+      - name: Push to GitHub Packages
+        run: >
+          dotnet nuget push "./artifacts/*.nupkg"
+          --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+          --api-key ${{ secrets.GITHUB_TOKEN }}
+          --skip-duplicate
+
