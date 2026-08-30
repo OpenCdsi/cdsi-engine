@@ -31,12 +31,19 @@
     <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
     <Copyright>Copyright (c) 2026 Dennis Dunn</Copyright>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <!-- CS1591 ("missing XML comment for publicly visible type or member") is suppressed
+    <!-- CS1591 ("missing XML comment for publicly visible type or member") and CS1573
+         ("parameter has no matching param tag, but other parameters do") are both suppressed
          deliberately: this project's own doc-comment convention documents WHY a class or method
-         works the way it does (the design reasoning), not a summary on every single public
-         member for its own sake - forcing the latter would mean adding boilerplate summaries
-         with no real content just to silence the compiler, not genuinely better documentation. -->
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+         works the way it does (the design reasoning) and calls out specific parameters only when
+         they genuinely need explanation - not a summary or a <param> tag on every single public
+         member/parameter for its own sake. Confirmed against the real pattern before suppressing,
+         not assumed: e.g. EvaluateSeriesHistory.Execute has <param> tags for the three parameters
+         that need explaining (antigenAdministeredRecords, priorEvaluatedDosesFromOtherAntigens,
+         assessmentDate) and none for the four self-explanatory ones (patient, series,
+         conflictsByImpactedCvx, resolveCompletedSeries) - exactly the selective style these two
+         warnings would otherwise force out of, replacing it with boilerplate tags with no real
+         content just to silence the compiler, not genuinely better documentation. -->
+    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
   </PropertyGroup>
 
 </Project>

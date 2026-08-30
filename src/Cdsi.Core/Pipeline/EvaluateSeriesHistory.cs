@@ -57,7 +57,7 @@ public sealed class SeriesHistoryResult
 /// evaluated from WITHIN this loop, since Table 6-6's decision only runs when there's an
 /// administered record to evaluate a target dose against. But the real Pertussis/Diphtheria/
 /// Tetanus data has standalone, dose-count-independent Evaluation-context Age conditions on
-/// Doses 1-6 (confirmed by reading the real XML directly, `<set>`-by-`<set>`, after an earlier,
+/// Doses 1-6 (confirmed by reading the real XML directly, `&lt;set&gt;`-by-`&lt;set&gt;`, after an earlier,
 /// less careful reading wrongly merged two separate OR'd sets into one AND'd condition) - Doses
 /// 1-3/5 skip at Age >= 7 years, Dose 4 at Age >= 4 years, Dose 6 unconditionally at Age >= 7
 /// years too. Dose 7's own age window (`minAge: 7 years`, confirmed identical on both the
