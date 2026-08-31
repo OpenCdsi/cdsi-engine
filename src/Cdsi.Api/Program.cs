@@ -50,8 +50,6 @@ var app = builder.Build();
 // themselves) - only the middleware that actually serves /swagger is gated here.
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-
     // WORKAROUND for a real, confirmed upstream bug, not a guess: Swashbuckle.AspNetCore 10.2.3
     // (via its Microsoft.OpenApi 2.x dependency) emits "openapi": "3.0.4" - a genuinely valid
     // OpenAPI 3.0 document, but the swagger-ui version this Swashbuckle release bundles has its
@@ -75,6 +73,17 @@ if (app.Environment.IsDevelopment())
     // test against, and a wrong guess there would silently do nothing. A raw string patch on the
     // already-serialized response depends on nothing but the confirmed byte content of the
     // problem itself.
+    //
+    // MUST be registered BEFORE app.UseSwagger() below, not after - a real bug in an earlier
+    // version of this fix, caught only by it genuinely not working when tested. UseSwagger()'s
+    // own middleware is a TERMINAL handler for /swagger/v1/swagger.json: it writes the response
+    // directly and returns without ever calling next(), the same way a controller action or
+    // minimal API endpoint terminates the pipeline. Registered after UseSwagger(), this
+    // middleware would never run at all for that path - UseSwagger() already ended the pipeline
+    // before reaching it. Registered before, it can wrap around UseSwagger(): call next(), let
+    // UseSwagger() write its response into the buffered stream, then inspect/patch what it wrote
+    // once next() returns - the standard ASP.NET Core "wrap a downstream terminal handler"
+    // pattern, which requires the wrapper to be the outer, earlier-registered layer.
     app.Use(async (context, next) =>
     {
         if (!context.Request.Path.StartsWithSegments("/swagger") || !context.Request.Path.Value!.EndsWith("swagger.json"))
@@ -86,14 +95,7 @@ if (app.Environment.IsDevelopment())
         var originalBody = context.Response.Body;
         using var buffer = new MemoryStream();
         context.Response.Body = buffer;
-        try
-        {
-            await next();
-        }
-        finally
-        {
-            context.Response.Body = originalBody;
-        }
+        await next();
 
         buffer.Seek(0, SeekOrigin.Begin);
         var content = await new StreamReader(buffer).ReadToEndAsync();
@@ -105,10 +107,25 @@ if (app.Environment.IsDevelopment())
         // trusting this.
         var patched = System.Text.RegularExpressions.Regex.Replace(
             content, @"(""openapi""\s*:\s*"")3\.0\.4("")", "${1}3.0.1${2}");
+        var patchedBytes = System.Text.Encoding.UTF8.GetBytes(patched);
 
-        await context.Response.WriteAsync(patched);
+        // Write the patched bytes directly to the ORIGINAL response stream, restoring
+        // context.Response.Body only AFTER that write completes - not the reverse. A real bug in
+        // an earlier version of this fix, caught only by it genuinely rendering a blank page when
+        // tested: restoring context.Response.Body = originalBody FIRST, then calling
+        // context.Response.WriteAsync(patched), goes through HttpResponse's own pipe-based
+        // BodyWriter internally - not the Body stream directly - and that adapter relationship
+        // was already stale after being pointed at the buffer during next(), producing a silent,
+        // empty write with no exception. Writing bytes straight to the captured stream reference
+        // avoids the HttpResponse abstraction (and its BodyWriter/Body adapter) entirely - this
+        // exact stream-to-stream pattern (not a string through the response abstraction) is what
+        // a real, confirmed-working example of this technique uses.
+        context.Response.ContentLength = patchedBytes.LongLength;
+        await originalBody.WriteAsync(patchedBytes);
+        context.Response.Body = originalBody;
     });
 
+    app.UseSwagger();
     app.UseSwaggerUI();
 }
 
