@@ -51,6 +51,64 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
+
+    // WORKAROUND for a real, confirmed upstream bug, not a guess: Swashbuckle.AspNetCore 10.2.3
+    // (via its Microsoft.OpenApi 2.x dependency) emits "openapi": "3.0.4" - a genuinely valid
+    // OpenAPI 3.0 document, but the swagger-ui version this Swashbuckle release bundles has its
+    // own version-string regex that only recognizes patch versions 0-3 (fixed upstream in
+    // swagger-ui 5.19.0, not yet pulled into this Swashbuckle release - see
+    // domaindrivendev/Swashbuckle.AspNetCore#3265 and swagger-api/swagger-ui#10502). The result
+    // is Swagger UI's own "does not specify a valid version field" error on an otherwise-correct
+    // document - confirmed directly: fetching /swagger/v1/swagger.json returns a well-formed
+    // document with a real, valid "openapi" field right at the top, contradicting the UI's error.
+    //
+    // Patches only the version digits themselves (3.0.4 -> 3.0.1, both 5 characters) via a
+    // capturing-group replacement that leaves the surrounding "openapi": "..." structure and
+    // whitespace completely untouched - guarantees an identical byte length to the original, so
+    // there's no Content-Length mismatch to account for. 3.0.1 through 3.0.4 are editorial-only
+    // revisions of the same OpenAPI 3.0 spec (no schema/feature differences), so this only
+    // changes the label Swagger UI reads, not the actual document Swagger UI renders.
+    //
+    // This is deliberately NOT a Microsoft.OpenApi object-model fix (e.g. a PreSerializeFilter
+    // setting some OpenApiVersion-style property) - that API surface exists in principle, but I
+    // couldn't confirm its exact shape for this specific package version without a real build to
+    // test against, and a wrong guess there would silently do nothing. A raw string patch on the
+    // already-serialized response depends on nothing but the confirmed byte content of the
+    // problem itself.
+    app.Use(async (context, next) =>
+    {
+        if (!context.Request.Path.StartsWithSegments("/swagger") || !context.Request.Path.Value!.EndsWith("swagger.json"))
+        {
+            await next();
+            return;
+        }
+
+        var originalBody = context.Response.Body;
+        using var buffer = new MemoryStream();
+        context.Response.Body = buffer;
+        try
+        {
+            await next();
+        }
+        finally
+        {
+            context.Response.Body = originalBody;
+        }
+
+        buffer.Seek(0, SeekOrigin.Begin);
+        var content = await new StreamReader(buffer).ReadToEndAsync();
+        // Capturing groups + backreferences, not lookbehind/lookahead - a variable-width
+        // lookbehind (needed here, since \s* between the colon and quote isn't fixed-width) isn't
+        // supported by every regex engine, and this couldn't be verified against a real .NET
+        // build - capturing groups are universally supported and were verified directly (Python's
+        // re, same semantics for this construct) against both compact and formatted JSON before
+        // trusting this.
+        var patched = System.Text.RegularExpressions.Regex.Replace(
+            content, @"(""openapi""\s*:\s*"")3\.0\.4("")", "${1}3.0.1${2}");
+
+        await context.Response.WriteAsync(patched);
+    });
+
     app.UseSwaggerUI();
 }
 
