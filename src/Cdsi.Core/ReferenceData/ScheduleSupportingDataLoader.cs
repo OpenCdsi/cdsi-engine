@@ -10,6 +10,7 @@ public sealed class ScheduleSupportingData
 {
     public required IReadOnlyDictionary<string, CvxMapEntry> CvxToAntigen { get; init; }
     public required IReadOnlyList<VaccineConflictRule> VaccineConflicts { get; init; }
+    public required IReadOnlyList<Observation> Observations { get; init; }
 
     /// <summary>
     /// VaccineConflicts indexed by impacted (current) CVX for O(1) lookup at evaluation time —
@@ -22,7 +23,12 @@ public sealed class ScheduleSupportingData
             .GroupBy(c => c.ImpactedCvx)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<VaccineConflictRule>)g.ToArray());
 
+    /// <summary>ObservationCode -> Observation, for O(1) lookup by code (e.g. the reference-data API's GET /observations/{code}). ObservationCode is unique across all 277 real entries.</summary>
+    public IReadOnlyDictionary<string, Observation> ObservationsByCode =>
+        _observationsByCode ??= Observations.ToDictionary(o => o.ObservationCode, o => o);
+
     private Dictionary<string, IReadOnlyList<VaccineConflictRule>>? _conflictsByImpactedCvx;
+    private Dictionary<string, Observation>? _observationsByCode;
 }
 
 /// <summary>Loads ScheduleSupportingData.xml — the cross-antigen lookups (CVX-to-antigen map, vaccine conflicts) that §4.2 and §6.7 depend on.</summary>
@@ -43,10 +49,16 @@ public static class ScheduleSupportingDataLoader
             .Select(ParseConflictRule)
             .ToArray();
 
+        var observationsRoot = root.Element("observations") ?? root;
+        var observations = observationsRoot.Elements("observation")
+            .Select(ParseObservation)
+            .ToArray();
+
         return new ScheduleSupportingData
         {
             CvxToAntigen = cvxEntries,
-            VaccineConflicts = conflicts
+            VaccineConflicts = conflicts,
+            Observations = observations
         };
     }
 
@@ -105,6 +117,30 @@ public static class ScheduleSupportingDataLoader
                 ?? throw new InvalidOperationException("liveVirusConflict missing minConflictEndInterval."),
             ConflictEndInterval = el.ParseDurationOrNull("conflictEndInterval")
                 ?? throw new InvalidOperationException("liveVirusConflict missing conflictEndInterval.")
+        };
+    }
+
+    private static Observation ParseObservation(XElement el)
+    {
+        var codedValuesRoot = el.Element("codedValues");
+        var codedValues = (codedValuesRoot?.Elements("codedValue") ?? Enumerable.Empty<XElement>())
+            .Select(cv => new CodedValue
+            {
+                Code = cv.ElementTextOrNull("code") ?? throw new InvalidOperationException("codedValue missing code."),
+                CodeSystem = cv.ElementTextOrNull("codeSystem") ?? throw new InvalidOperationException("codedValue missing codeSystem."),
+                Text = cv.ElementTextOrNull("text")
+            })
+            .ToArray();
+
+        return new Observation
+        {
+            ObservationCode = el.ElementTextOrNull("observationCode") ?? throw new InvalidOperationException("observation missing observationCode."),
+            ObservationTitle = el.ElementTextOrNull("observationTitle") ?? throw new InvalidOperationException("observation missing observationTitle."),
+            Group = el.ElementTextOrNull("group"),
+            IndicationText = el.ElementTextOrNull("indicationText"),
+            ContraindicationText = el.ElementTextOrNull("contraindicationText"),
+            ClarifyingText = el.ElementTextOrNull("clarifyingText"),
+            CodedValues = codedValues
         };
     }
 }

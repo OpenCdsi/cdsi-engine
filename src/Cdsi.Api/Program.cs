@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+using Cdsi.Api;
 using Cdsi.Contracts;
 using Cdsi.Core.Models;
 using Cdsi.Core.Pipeline;
@@ -134,6 +135,15 @@ app.MapPost("/api/v1/forecast", (ForecastRequestDto request, ReferenceDataReposi
     return Results.Ok(ResponseMapping.ToResponse(request.PatientId, assessmentDate, results));
 })
 .WithName("GenerateForecast");
+
+// Reference-data browsing endpoints (GET /api/v2/antigens|vaccines|vaccines/groups|observations/*)
+// - mirrors the shape of an existing NodeJS "CDSi Supporting Data API" this project is
+// replicating. The q/fields query parameters from that API's own spec are deliberately not
+// built yet - out of scope for this round.
+app.MapAntigenEndpoints();
+app.MapVaccineEndpoints();
+app.MapVaccineGroupEndpoints();
+app.MapObservationEndpoints();
 
 app.Run();
 
