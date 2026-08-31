@@ -19,17 +19,17 @@ namespace Cdsi.Api;
 /// </summary>
 public static class ObservationEndpoints
 {
-    public static void MapObservationEndpoints(this WebApplication app)
+    public static void MapObservationEndpoints(this IEndpointRouteBuilder group)
     {
-        app.MapGet("/api/v2/observations/catalog", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
+        group.MapGet("/observations/catalog", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
             .WithName("GetObservationCatalog")
             .WithTags("Observations");
 
-        app.MapGet("/api/v2/observations", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
+        group.MapGet("/observations", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
             .WithName("GetObservations")
             .WithTags("Observations");
 
-        app.MapGet("/api/v2/observations/{code}", (string code, ReferenceDataRepository data) =>
+        group.MapGet("/observations/{code}", (string code, ReferenceDataRepository data) =>
         {
             return data.Schedule.ObservationsByCode.TryGetValue(code, out var observation)
                 ? Results.Ok(ReferenceDataMapping.ToDto(observation))

@@ -20,17 +20,17 @@ namespace Cdsi.Api;
 /// </summary>
 public static class VaccineEndpoints
 {
-    public static void MapVaccineEndpoints(this WebApplication app)
+    public static void MapVaccineEndpoints(this IEndpointRouteBuilder group)
     {
-        app.MapGet("/api/v2/vaccines/catalog", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
+        group.MapGet("/vaccines/catalog", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
             .WithName("GetVaccineCatalog")
             .WithTags("Vaccines");
 
-        app.MapGet("/api/v2/vaccines", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
+        group.MapGet("/vaccines", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
             .WithName("GetVaccines")
             .WithTags("Vaccines");
 
-        app.MapGet("/api/v2/vaccines/{cvx}", (string cvx, ReferenceDataRepository data) =>
+        group.MapGet("/vaccines/{cvx}", (string cvx, ReferenceDataRepository data) =>
         {
             return data.Schedule.CvxToAntigen.TryGetValue(cvx, out var entry)
                 ? Results.Ok(ReferenceDataMapping.ToDto(entry))
@@ -39,7 +39,7 @@ public static class VaccineEndpoints
             .WithName("GetVaccineByCvx")
             .WithTags("Vaccines");
 
-        app.MapGet("/api/v2/vaccines/{cvx}/conflicts", (string cvx, ReferenceDataRepository data) =>
+        group.MapGet("/vaccines/{cvx}/conflicts", (string cvx, ReferenceDataRepository data) =>
         {
             if (!data.Schedule.CvxToAntigen.ContainsKey(cvx))
             {
@@ -53,7 +53,7 @@ public static class VaccineEndpoints
             .WithName("GetVaccineConflicts")
             .WithTags("Vaccines");
 
-        app.MapGet("/api/v2/vaccines/{cvx}/antigens", (string cvx, ReferenceDataRepository data) =>
+        group.MapGet("/vaccines/{cvx}/antigens", (string cvx, ReferenceDataRepository data) =>
         {
             return data.Schedule.CvxToAntigen.TryGetValue(cvx, out var entry)
                 ? Results.Ok(entry.Associations.Select(a => a.Antigen).ToArray())

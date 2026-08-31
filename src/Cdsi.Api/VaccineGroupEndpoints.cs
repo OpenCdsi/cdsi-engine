@@ -16,31 +16,31 @@ namespace Cdsi.Api;
 /// </summary>
 public static class VaccineGroupEndpoints
 {
-    public static void MapVaccineGroupEndpoints(this WebApplication app)
+    public static void MapVaccineGroupEndpoints(this IEndpointRouteBuilder group)
     {
-        app.MapGet("/api/v2/vaccines/groups/catalog", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
+        group.MapGet("/vaccines/groups/catalog", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
             .WithName("GetVaccineGroupCatalog")
             .WithTags("VaccineGroups");
 
-        app.MapGet("/api/v2/vaccines/groups", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
+        group.MapGet("/vaccines/groups", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
             .WithName("GetVaccineGroups")
             .WithTags("VaccineGroups");
 
-        app.MapGet("/api/v2/vaccines/groups/{name}", (string name, ReferenceDataRepository data) =>
+        group.MapGet("/vaccines/groups/{name}", (string name, ReferenceDataRepository data) =>
         {
-            var group = FindGroup(data, name);
-            return group is not null
-                ? Results.Ok(ReferenceDataMapping.ToDto(group, AntigensInGroup(data, group.Name)))
+            var vaccineGroup = FindGroup(data, name);
+            return vaccineGroup is not null
+                ? Results.Ok(ReferenceDataMapping.ToDto(vaccineGroup, AntigensInGroup(data, vaccineGroup.Name)))
                 : Results.NotFound();
         })
             .WithName("GetVaccineGroupByName")
             .WithTags("VaccineGroups");
 
-        app.MapGet("/api/v2/vaccines/groups/{name}/antigens", (string name, ReferenceDataRepository data) =>
+        group.MapGet("/vaccines/groups/{name}/antigens", (string name, ReferenceDataRepository data) =>
         {
-            var group = FindGroup(data, name);
-            return group is not null
-                ? Results.Ok(AntigensInGroup(data, group.Name).ToArray())
+            var vaccineGroup = FindGroup(data, name);
+            return vaccineGroup is not null
+                ? Results.Ok(AntigensInGroup(data, vaccineGroup.Name).ToArray())
                 : Results.NotFound();
         })
             .WithName("GetVaccineGroupAntigens")

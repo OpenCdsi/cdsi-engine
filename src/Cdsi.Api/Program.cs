@@ -138,12 +138,14 @@ app.MapPost("/api/v1/forecast", (ForecastRequestDto request, ReferenceDataReposi
 
 // Reference-data browsing endpoints (GET /api/v2/antigens|vaccines|vaccines/groups|observations/*)
 // - mirrors the shape of an existing NodeJS "CDSi Supporting Data API" this project is
-// replicating. The q/fields query parameters from that API's own spec are deliberately not
-// built yet - out of scope for this round.
-app.MapAntigenEndpoints();
-app.MapVaccineEndpoints();
-app.MapVaccineGroupEndpoints();
-app.MapObservationEndpoints();
+// replicating. Registered on a shared route group so QFieldsEndpointFilter (the q/fields query
+// parameters from that API's own spec) applies uniformly to all of them, and to any future
+// /api/v2 endpoint, without needing to be wired in by hand at each individual MapGet call.
+var referenceDataApi = app.MapGroup("/api/v2").AddEndpointFilter<QFieldsEndpointFilter>();
+referenceDataApi.MapAntigenEndpoints();
+referenceDataApi.MapVaccineEndpoints();
+referenceDataApi.MapVaccineGroupEndpoints();
+referenceDataApi.MapObservationEndpoints();
 
 app.Run();
 

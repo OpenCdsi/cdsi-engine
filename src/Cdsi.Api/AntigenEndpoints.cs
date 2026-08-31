@@ -25,17 +25,17 @@ namespace Cdsi.Api;
 /// </summary>
 public static class AntigenEndpoints
 {
-    public static void MapAntigenEndpoints(this WebApplication app)
+    public static void MapAntigenEndpoints(this IEndpointRouteBuilder group)
     {
-        app.MapGet("/api/v2/antigens/catalog", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
+        group.MapGet("/antigens/catalog", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
             .WithName("GetAntigenCatalog")
             .WithTags("Antigens");
 
-        app.MapGet("/api/v2/antigens", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
+        group.MapGet("/antigens", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
             .WithName("GetAntigens")
             .WithTags("Antigens");
 
-        app.MapGet("/api/v2/antigens/{name}", (string name, ReferenceDataRepository data) =>
+        group.MapGet("/antigens/{name}", (string name, ReferenceDataRepository data) =>
         {
             var summary = GetSummaries(data).SingleOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
             return summary is not null ? Results.Ok(summary) : Results.NotFound();
@@ -43,7 +43,7 @@ public static class AntigenEndpoints
             .WithName("GetAntigenByName")
             .WithTags("Antigens");
 
-        app.MapGet("/api/v2/antigens/{name}/series", (string name, ReferenceDataRepository data) =>
+        group.MapGet("/antigens/{name}/series", (string name, ReferenceDataRepository data) =>
         {
             var series = FindSeriesForAntigen(data, name);
             return series is not null
@@ -53,7 +53,7 @@ public static class AntigenEndpoints
             .WithName("GetAntigenSeries")
             .WithTags("Antigens");
 
-        app.MapGet("/api/v2/antigens/{name}/series/{id}", (string name, string id, ReferenceDataRepository data) =>
+        group.MapGet("/antigens/{name}/series/{id}", (string name, string id, ReferenceDataRepository data) =>
         {
             var series = FindSeriesForAntigen(data, name);
             if (series is null)
@@ -80,7 +80,7 @@ public static class AntigenEndpoints
             .WithName("GetAntigenSeriesById")
             .WithTags("Antigens");
 
-        app.MapGet("/api/v2/antigens/{name}/contraindications", (string name, ReferenceDataRepository data) =>
+        group.MapGet("/antigens/{name}/contraindications", (string name, ReferenceDataRepository data) =>
         {
             var matchedAntigen = data.ContraindicationsByAntigen.Keys
                 .FirstOrDefault(a => string.Equals(a, name, StringComparison.OrdinalIgnoreCase));
