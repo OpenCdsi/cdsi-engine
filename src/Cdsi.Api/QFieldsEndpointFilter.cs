@@ -12,11 +12,11 @@ namespace Cdsi.Api;
 ///   q      - "Return only the objects containing the given value." e.g. /antigens/HepA/series?q=risk
 ///   fields - "Return only the fields named in the parameter." e.g. /vaccines?fields=cvx,shortDescription
 ///
-/// Applied as ONE IEndpointFilter registered on the whole /api/v2 route group (see Program.cs),
+/// Applied as ONE IEndpointFilter registered on the whole /api/v3 route group (see Program.cs),
 /// rather than added individually to each of the 18 reference-data endpoints - this is a
-/// cross-cutting concern that should apply uniformly, and any future /api/v2 endpoint gets it
+/// cross-cutting concern that should apply uniformly, and any future /api/v3 endpoint gets it
 /// automatically without needing to remember to wire it in by hand. Deliberately NOT applied to
-/// /api/v1/forecast or /health - q/fields are this reference-data API's own contract, not a
+/// /api/v3/forecast or /health - q/fields are this reference-data API's own contract, not a
 /// general-purpose feature of every endpoint in this project.
 ///
 /// Works on the endpoint's already-produced IResult, not by touching the 18 handlers themselves:

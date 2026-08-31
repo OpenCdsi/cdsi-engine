@@ -8,16 +8,14 @@ using Cdsi.Core.ReferenceData;
 namespace Cdsi.Api;
 
 /// <summary>
-/// GET /api/v2/antigens/* - mirrors the shape of an existing NodeJS "CDSi Supporting Data API"
-/// this project is replicating (catalog/list/by-name/series/series-by-id/contraindications).
+/// GET /api/v3/antigens/* - mirrors the shape of an existing NodeJS "CDSi Supporting Data API"
+/// this project is replicating (list/by-name/series/series-by-id/contraindications).
 ///
-/// /antigens/catalog and /antigens deliberately return the SAME lightweight summary shape
-/// (name + series count), not full series detail for every antigen at once - the real, detailed
-/// series data (deeply nested age/interval/vaccine-type/conditional-skip rules) is available per
-/// antigen via /antigens/{name}/series, and returning that for all 30 antigens in one response
-/// would be both huge and rarely what a caller actually wants from a "list" endpoint. Worth
-/// reconsidering if the real NodeJS version's /antigens response is closer to /antigens/{name}
-/// per entry - flagged here rather than assumed silently.
+/// /antigens returns a lightweight summary (name + series count) for every antigen, not full
+/// series detail for all 30 at once - the real, detailed series data (deeply nested
+/// age/interval/vaccine-type/conditional-skip rules) is available per antigen via
+/// /antigens/{name}/series. Worth reconsidering if the real NodeJS version's /antigens response
+/// is closer to /antigens/{name} per entry - flagged here rather than assumed silently.
 ///
 /// Antigen name lookups are case-insensitive (a browsable reference API's own names, like "HepA"
 /// vs "hepa", shouldn't require exact-case recall) - CVX code lookups in the vaccine endpoints
@@ -27,13 +25,9 @@ public static class AntigenEndpoints
 {
     public static void MapAntigenEndpoints(this IEndpointRouteBuilder group)
     {
-        group.MapGet("/antigens/catalog", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
-            .WithName("GetAntigenCatalog")
-            .WithTags("Antigens");
-
         group.MapGet("/antigens", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
             .WithName("GetAntigens")
-            .WithTags("Antigens");
+            .WithTags("Supporting Data");
 
         group.MapGet("/antigens/{name}", (string name, ReferenceDataRepository data) =>
         {
@@ -41,7 +35,7 @@ public static class AntigenEndpoints
             return summary is not null ? Results.Ok(summary) : Results.NotFound();
         })
             .WithName("GetAntigenByName")
-            .WithTags("Antigens");
+            .WithTags("Supporting Data");
 
         group.MapGet("/antigens/{name}/series", (string name, ReferenceDataRepository data) =>
         {
@@ -51,7 +45,7 @@ public static class AntigenEndpoints
                 : Results.NotFound();
         })
             .WithName("GetAntigenSeries")
-            .WithTags("Antigens");
+            .WithTags("Supporting Data");
 
         group.MapGet("/antigens/{name}/series/{id}", (string name, string id, ReferenceDataRepository data) =>
         {
@@ -78,7 +72,7 @@ public static class AntigenEndpoints
             return match is not null ? Results.Ok(ReferenceDataMapping.ToDto(match)) : Results.NotFound();
         })
             .WithName("GetAntigenSeriesById")
-            .WithTags("Antigens");
+            .WithTags("Supporting Data");
 
         group.MapGet("/antigens/{name}/contraindications", (string name, ReferenceDataRepository data) =>
         {
@@ -89,7 +83,7 @@ public static class AntigenEndpoints
                 : Results.NotFound();
         })
             .WithName("GetAntigenContraindications")
-            .WithTags("Antigens");
+            .WithTags("Supporting Data");
     }
 
     private static IReadOnlyList<AntigenSummaryDto> GetSummaries(ReferenceDataRepository data) =>

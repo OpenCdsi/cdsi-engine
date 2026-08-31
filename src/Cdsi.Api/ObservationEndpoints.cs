@@ -8,7 +8,7 @@ using Cdsi.Core.ReferenceData;
 namespace Cdsi.Api;
 
 /// <summary>
-/// GET /api/v2/observations/* - backed by the Schedule file's own dedicated &lt;observations&gt;
+/// GET /api/v3/observations/* - backed by the Schedule file's own dedicated &lt;observations&gt;
 /// catalog (277 real entries), which nothing in this codebase parsed before this addition - see
 /// Observation's own doc comment for why this is a genuinely new capability, and how it differs
 /// from the per-series Indication.ObservationCode already used elsewhere.
@@ -21,13 +21,9 @@ public static class ObservationEndpoints
 {
     public static void MapObservationEndpoints(this IEndpointRouteBuilder group)
     {
-        group.MapGet("/observations/catalog", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
-            .WithName("GetObservationCatalog")
-            .WithTags("Observations");
-
         group.MapGet("/observations", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
             .WithName("GetObservations")
-            .WithTags("Observations");
+            .WithTags("Supporting Data");
 
         group.MapGet("/observations/{code}", (string code, ReferenceDataRepository data) =>
         {
@@ -36,7 +32,7 @@ public static class ObservationEndpoints
                 : Results.NotFound();
         })
             .WithName("GetObservationByCode")
-            .WithTags("Observations");
+            .WithTags("Supporting Data");
     }
 
     private static IReadOnlyList<ObservationSummaryDto> GetSummaries(ReferenceDataRepository data) =>

@@ -5,7 +5,7 @@
 namespace Cdsi.Contracts;
 
 /// <summary>
-/// The full request body for POST /api/v1/forecast. Every field here maps directly to a field
+/// The full request body for POST /api/v3/forecast. Every field here maps directly to a field
 /// on Cdsi.Core.Models.Patient/VaccineDoseAdministered - see RequestMapping for the exact
 /// mapping, including which optional fields default to what.
 /// </summary>

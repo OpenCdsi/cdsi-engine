@@ -8,7 +8,7 @@ using Cdsi.Core.ReferenceData;
 namespace Cdsi.Api;
 
 /// <summary>
-/// GET /api/v2/vaccines/groups/* - antigen membership is deliberately derived from
+/// GET /api/v3/vaccines/groups/* - antigen membership is deliberately derived from
 /// AntigenSeries.VaccineGroup across all antigen files, NOT from the Schedule file's own
 /// vaccineGroupToAntigenMap element - see VaccineGroupDto's own doc comment for why (that table
 /// is documented as incomplete for real multi-antigen groups, dropping antigens like Mumps/
@@ -18,13 +18,9 @@ public static class VaccineGroupEndpoints
 {
     public static void MapVaccineGroupEndpoints(this IEndpointRouteBuilder group)
     {
-        group.MapGet("/vaccines/groups/catalog", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
-            .WithName("GetVaccineGroupCatalog")
-            .WithTags("VaccineGroups");
-
         group.MapGet("/vaccines/groups", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
             .WithName("GetVaccineGroups")
-            .WithTags("VaccineGroups");
+            .WithTags("Supporting Data");
 
         group.MapGet("/vaccines/groups/{name}", (string name, ReferenceDataRepository data) =>
         {
@@ -34,7 +30,7 @@ public static class VaccineGroupEndpoints
                 : Results.NotFound();
         })
             .WithName("GetVaccineGroupByName")
-            .WithTags("VaccineGroups");
+            .WithTags("Supporting Data");
 
         group.MapGet("/vaccines/groups/{name}/antigens", (string name, ReferenceDataRepository data) =>
         {
@@ -44,7 +40,7 @@ public static class VaccineGroupEndpoints
                 : Results.NotFound();
         })
             .WithName("GetVaccineGroupAntigens")
-            .WithTags("VaccineGroups");
+            .WithTags("Supporting Data");
     }
 
     private static IReadOnlyList<VaccineGroupSummaryDto> GetSummaries(ReferenceDataRepository data) =>

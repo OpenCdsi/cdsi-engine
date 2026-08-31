@@ -19,11 +19,33 @@ builder.Services.AddSwaggerGen(options =>
     // Microsoft.OpenApi.Models namespace no longer exists in the v2.x line at all. Caught by
     // checking Swashbuckle's own official v10 migration guide before trusting the version bump
     // alone would be enough - it explicitly wasn't.
-    options.SwaggerDoc("v1", new Microsoft.OpenApi.OpenApiInfo
+    options.SwaggerDoc("v3", new Microsoft.OpenApi.OpenApiInfo
     {
         Title = "CDSi Immunization Engine API",
-        Version = "v1",
-        Description = "Real-time immunization forecasting per the CDC's CDSi Logic Specification v4.6."
+        Version = "v3",
+        // The q/fields narrative matches the exact HTML-in-info.description pattern the real
+        // NodeJS "CDSi Supporting Data API" this project replicates already uses (confirmed
+        // working there, not a guess at how Swagger UI renders it) - kept here rather than as a
+        // per-tag description, since that's a Swagger UI rendering behavior I haven't verified,
+        // and this session has already had enough genuine Swagger UI surprises to prefer the
+        // proven mechanism over a theoretically-nicer one. Examples use this API's own real
+        // routes and real camelCase field names (associations on VaccineDto, confirmed against
+        // the actual DTO before writing it in - not the original NodeJS API's differently-shaped
+        // fields) - a wrong example here would be actively misleading, not just cosmetically off.
+        Description = """
+            Real-time immunization forecasting per the CDC's CDSi Logic Specification v4.6.
+
+            <h3>Query Parameters</h3>
+            <p>The following query parameters can be added to the URL of any Supporting Data (GET) endpoint to adjust the response. They don't apply to the Forecast endpoint.</p>
+            <dl>
+              <dt>q</dt>
+              <dd>Return only the objects containing the given value.<i>&nbsp;&nbsp;/api/v3/antigens/HepA/series?q=risk</i></dd>
+            </dl>
+            <dl>
+              <dt>fields</dt>
+              <dd>Return only the fields named in the parameter.<i>&nbsp;&nbsp;/api/v3/vaccines/102?fields=associations</i></dd>
+            </dl>
+            """
     });
 });
 
@@ -57,7 +79,7 @@ if (app.Environment.IsDevelopment())
     // swagger-ui 5.19.0, not yet pulled into this Swashbuckle release - see
     // domaindrivendev/Swashbuckle.AspNetCore#3265 and swagger-api/swagger-ui#10502). The result
     // is Swagger UI's own "does not specify a valid version field" error on an otherwise-correct
-    // document - confirmed directly: fetching /swagger/v1/swagger.json returns a well-formed
+    // document - confirmed directly: fetching /swagger/v3/swagger.json returns a well-formed
     // document with a real, valid "openapi" field right at the top, contradicting the UI's error.
     //
     // Patches only the version digits themselves (3.0.4 -> 3.0.1, both 5 characters) via a
@@ -76,7 +98,7 @@ if (app.Environment.IsDevelopment())
     //
     // MUST be registered BEFORE app.UseSwagger() below, not after - a real bug in an earlier
     // version of this fix, caught only by it genuinely not working when tested. UseSwagger()'s
-    // own middleware is a TERMINAL handler for /swagger/v1/swagger.json: it writes the response
+    // own middleware is a TERMINAL handler for /swagger/v3/swagger.json: it writes the response
     // directly and returns without ever calling next(), the same way a controller action or
     // minimal API endpoint terminates the pipeline. Registered after UseSwagger(), this
     // middleware would never run at all for that path - UseSwagger() already ended the pipeline
@@ -126,7 +148,16 @@ if (app.Environment.IsDevelopment())
     });
 
     app.UseSwagger();
-    app.UseSwaggerUI();
+    // Explicit SwaggerEndpoint, not the parameterless UseSwaggerUI() default - that default
+    // assumes the document is named "v1" and served at /swagger/v1/swagger.json. Since
+    // AddSwaggerGen above now registers the document as "v3", leaving this parameterless would
+    // point the UI at a path that no longer exists (/swagger/v1/swagger.json), reproducing the
+    // exact class of "UI can't find/render the document" failure already worked through above -
+    // stated explicitly here so the two stay in sync if the document name ever changes again.
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/swagger/v3/swagger.json", "CDSi Immunization Engine API v3");
+    });
 }
 
 // Unexpected exceptions get logged in full server-side but never leak details to the caller -
@@ -197,7 +228,7 @@ app.MapGet("/health", (ReferenceDataRepository data) => Results.Ok(new
 }))
 .WithName("HealthCheck");
 
-app.MapPost("/api/v1/forecast", (ForecastRequestDto request, ReferenceDataRepository data) =>
+app.MapPost("/api/v3/forecast", (ForecastRequestDto request, ReferenceDataRepository data) =>
 {
     var patient = RequestMapping.ToPatient(request);
     var doses = RequestMapping.ToAdministeredDoses(request);
@@ -209,14 +240,15 @@ app.MapPost("/api/v1/forecast", (ForecastRequestDto request, ReferenceDataReposi
 
     return Results.Ok(ResponseMapping.ToResponse(request.PatientId, assessmentDate, results));
 })
-.WithName("GenerateForecast");
+.WithName("GenerateForecast")
+.WithTags("Forecast");
 
-// Reference-data browsing endpoints (GET /api/v2/antigens|vaccines|vaccines/groups|observations/*)
+// Reference-data browsing endpoints (GET /api/v3/antigens|vaccines|vaccines/groups|observations/*)
 // - mirrors the shape of an existing NodeJS "CDSi Supporting Data API" this project is
 // replicating. Registered on a shared route group so QFieldsEndpointFilter (the q/fields query
 // parameters from that API's own spec) applies uniformly to all of them, and to any future
-// /api/v2 endpoint, without needing to be wired in by hand at each individual MapGet call.
-var referenceDataApi = app.MapGroup("/api/v2").AddEndpointFilter<QFieldsEndpointFilter>();
+// /api/v3 endpoint, without needing to be wired in by hand at each individual MapGet call.
+var referenceDataApi = app.MapGroup("/api/v3").AddEndpointFilter<QFieldsEndpointFilter>();
 referenceDataApi.MapAntigenEndpoints();
 referenceDataApi.MapVaccineEndpoints();
 referenceDataApi.MapVaccineGroupEndpoints();

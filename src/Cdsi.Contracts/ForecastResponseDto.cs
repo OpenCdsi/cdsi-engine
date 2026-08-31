@@ -4,7 +4,7 @@
 
 namespace Cdsi.Contracts;
 
-/// <summary>The full response body for POST /api/v1/forecast - one entry per vaccine group.</summary>
+/// <summary>The full response body for POST /api/v3/forecast - one entry per vaccine group.</summary>
 public sealed class ForecastResponseDto
 {
     public required string PatientId { get; init; }

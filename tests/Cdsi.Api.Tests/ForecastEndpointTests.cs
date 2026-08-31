@@ -58,7 +58,7 @@ public class ForecastEndpointTests : IClassFixture<WebApplicationFactory<Program
             administeredDoses = Array.Empty<object>()
         };
 
-        var response = await _client.PostAsJsonAsync("/api/v1/forecast", request);
+        var response = await _client.PostAsJsonAsync("/api/v3/forecast", request);
 
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
@@ -99,7 +99,7 @@ public class ForecastEndpointTests : IClassFixture<WebApplicationFactory<Program
             }
         };
 
-        var response = await _client.PostAsJsonAsync("/api/v1/forecast", request);
+        var response = await _client.PostAsJsonAsync("/api/v3/forecast", request);
 
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
@@ -123,7 +123,7 @@ public class ForecastEndpointTests : IClassFixture<WebApplicationFactory<Program
             gender = "not-a-real-gender"
         };
 
-        var response = await _client.PostAsJsonAsync("/api/v1/forecast", request);
+        var response = await _client.PostAsJsonAsync("/api/v3/forecast", request);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
@@ -137,7 +137,7 @@ public class ForecastEndpointTests : IClassFixture<WebApplicationFactory<Program
         // through minimal API model binding, should reject this before the handler ever runs.
         var request = new { patientId = "test-patient-4" };
 
-        var response = await _client.PostAsJsonAsync("/api/v1/forecast", request);
+        var response = await _client.PostAsJsonAsync("/api/v3/forecast", request);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -151,7 +151,7 @@ public class ForecastEndpointTests : IClassFixture<WebApplicationFactory<Program
             dateOfBirth = "2024-01-01"
         };
 
-        var response = await _client.PostAsJsonAsync("/api/v1/forecast", request);
+        var response = await _client.PostAsJsonAsync("/api/v3/forecast", request);
 
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);

@@ -8,7 +8,7 @@ using Cdsi.Core.ReferenceData;
 namespace Cdsi.Api;
 
 /// <summary>
-/// GET /api/v2/vaccines/* - CVX code lookups are exact-string, NOT case-insensitive (unlike the
+/// GET /api/v3/vaccines/* - CVX code lookups are exact-string, NOT case-insensitive (unlike the
 /// name-based antigen/vaccine-group lookups) - CVX codes are opaque numeric-string identifiers,
 /// not human-typed names, so there's no meaningful "case" to be lenient about.
 ///
@@ -22,13 +22,9 @@ public static class VaccineEndpoints
 {
     public static void MapVaccineEndpoints(this IEndpointRouteBuilder group)
     {
-        group.MapGet("/vaccines/catalog", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
-            .WithName("GetVaccineCatalog")
-            .WithTags("Vaccines");
-
         group.MapGet("/vaccines", (ReferenceDataRepository data) => Results.Ok(GetSummaries(data)))
             .WithName("GetVaccines")
-            .WithTags("Vaccines");
+            .WithTags("Supporting Data");
 
         group.MapGet("/vaccines/{cvx}", (string cvx, ReferenceDataRepository data) =>
         {
@@ -37,7 +33,7 @@ public static class VaccineEndpoints
                 : Results.NotFound();
         })
             .WithName("GetVaccineByCvx")
-            .WithTags("Vaccines");
+            .WithTags("Supporting Data");
 
         group.MapGet("/vaccines/{cvx}/conflicts", (string cvx, ReferenceDataRepository data) =>
         {
@@ -51,7 +47,7 @@ public static class VaccineEndpoints
             return Results.Ok(conflicts.Select(ReferenceDataMapping.ToDto).ToArray());
         })
             .WithName("GetVaccineConflicts")
-            .WithTags("Vaccines");
+            .WithTags("Supporting Data");
 
         group.MapGet("/vaccines/{cvx}/antigens", (string cvx, ReferenceDataRepository data) =>
         {
@@ -60,7 +56,7 @@ public static class VaccineEndpoints
                 : Results.NotFound();
         })
             .WithName("GetVaccineAntigens")
-            .WithTags("Vaccines");
+            .WithTags("Supporting Data");
     }
 
     private static IReadOnlyList<VaccineSummaryDto> GetSummaries(ReferenceDataRepository data) =>
