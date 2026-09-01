@@ -1,11 +1,11 @@
-# Publishes OpenCdsi.Core to GitHub Packages whenever a semver tag is pushed to main.
+# Publishes the OpenCdsi.VaxEngine package to GitHub Packages whenever a semver tag is pushed to main.
 #
-# Deliberately narrow in scope: this workflow only builds and publishes src/Cdsi.Core - the one
+# Deliberately narrow in scope: this workflow only builds and publishes src/OpenCdsi.VaxEngine.Core - the one
 # project actually meant for external, NuGet consumption (e.g. a .NET MAUI app referencing it).
-# Cdsi.Api/Cdsi.Functions/Cdsi.Demo and the reference data under data/ are not part of this -
+# OpenCdsi.VaxEngine.Api/OpenCdsi.VaxEngine.Functions/OpenCdsi.VaxEngine.Demo and the reference data under data/ are not part of this -
 # they're deployed differently (see the repo's own Dockerfile/docker-compose.yml), and bundling
 # them into this package would contradict the project's own stated goal of keeping schedule data
-# externally updatable without a new package release (see Cdsi.Core.csproj's own comments).
+# externally updatable without a new package release (see OpenCdsi.VaxEngine.Core.csproj's own comments).
 #
 # Two safety checks run BEFORE anything gets built or published, since a wrong version number or
 # a tag placed on the wrong branch is much harder to undo once a package is live on the registry
@@ -22,7 +22,7 @@
 # tag is real semver" step below, with a clear, specific failure message rather than a vague
 # build error if someone pushes something like "v1.2" or "version-1.2.0" by mistake.
 
-name: Publish OpenCdsi.Core to GitHub Packages
+name: Publish OpenCdsi.VaxEngine to GitHub Packages
 
 on:
   push:
@@ -72,11 +72,11 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore
-        run: dotnet restore src/Cdsi.Core/Cdsi.Core.csproj
+        run: dotnet restore src/OpenCdsi.VaxEngine.Core/OpenCdsi.VaxEngine.Core.csproj
 
       - name: Pack
         run: >
-          dotnet pack src/Cdsi.Core/Cdsi.Core.csproj
+          dotnet pack src/OpenCdsi.VaxEngine.Core/OpenCdsi.VaxEngine.Core.csproj
           -c Release
           -o ./artifacts
           -p:Version=${{ steps.version.outputs.version }}
@@ -88,4 +88,3 @@ jobs:
           --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
           --api-key ${{ secrets.GITHUB_TOKEN }}
           --skip-duplicate
-
