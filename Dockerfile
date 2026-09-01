@@ -4,21 +4,21 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Only the .csproj files Cdsi.Api actually depends on (itself, Cdsi.Contracts, Cdsi.Core) are
-# copied for the restore-caching step - restoring Cdsi.Api.csproj directly (not the whole
-# Cdsi.sln) means this image build never needs to know about Cdsi.Demo, Cdsi.Functions, or
+# Only the .csproj files OpenCdsi.VaxEngine.Api actually depends on (itself, OpenCdsi.VaxEngine.Contracts, OpenCdsi.VaxEngine.Core) are
+# copied for the restore-caching step - restoring OpenCdsi.VaxEngine.Api.csproj directly (not the whole
+# OpenCdsi.VaxEngine.sln) means this image build never needs to know about OpenCdsi.VaxEngine.Demo, OpenCdsi.VaxEngine.Functions, or
 # either test project, none of which are part of what gets published here. Also means adding a
-# new project to the solution later doesn't require touching this Dockerfile unless Cdsi.Api
+# new project to the solution later doesn't require touching this Dockerfile unless OpenCdsi.VaxEngine.Api
 # itself gains a new dependency.
-COPY src/Cdsi.Core/Cdsi.Core.csproj src/Cdsi.Core/
-COPY src/Cdsi.Contracts/Cdsi.Contracts.csproj src/Cdsi.Contracts/
-COPY src/Cdsi.Api/Cdsi.Api.csproj src/Cdsi.Api/
-RUN dotnet restore src/Cdsi.Api/Cdsi.Api.csproj
+COPY src/OpenCdsi.VaxEngine.Core/OpenCdsi.VaxEngine.Core.csproj src/OpenCdsi.VaxEngine.Core/
+COPY src/OpenCdsi.VaxEngine.Contracts/OpenCdsi.VaxEngine.Contracts.csproj src/OpenCdsi.VaxEngine.Contracts/
+COPY src/OpenCdsi.VaxEngine.Api/OpenCdsi.VaxEngine.Api.csproj src/OpenCdsi.VaxEngine.Api/
+RUN dotnet restore src/OpenCdsi.VaxEngine.Api/OpenCdsi.VaxEngine.Api.csproj
 
-COPY src/Cdsi.Core/ src/Cdsi.Core/
-COPY src/Cdsi.Contracts/ src/Cdsi.Contracts/
-COPY src/Cdsi.Api/ src/Cdsi.Api/
-RUN dotnet publish src/Cdsi.Api/Cdsi.Api.csproj -c Release -o /app --no-restore
+COPY src/OpenCdsi.VaxEngine.Core/ src/OpenCdsi.VaxEngine.Core/
+COPY src/OpenCdsi.VaxEngine.Contracts/ src/OpenCdsi.VaxEngine.Contracts/
+COPY src/OpenCdsi.VaxEngine.Api/ src/OpenCdsi.VaxEngine.Api/
+RUN dotnet publish src/OpenCdsi.VaxEngine.Api/OpenCdsi.VaxEngine.Api.csproj -c Release -o /app --no-restore
 
 # Runtime stage - the smaller ASP.NET runtime image, not the full SDK.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
@@ -41,4 +41,4 @@ ENV CDSI_DATA_PATH=/data
 EXPOSE 8080
 VOLUME /data
 
-ENTRYPOINT ["dotnet", "Cdsi.Api.dll"]
+ENTRYPOINT ["dotnet", "OpenCdsi.VaxEngine.Api.dll"]

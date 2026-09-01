@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>OpenCdsi.VaxEngine.Core</RootNamespace>
+    <LangVersion>12</LangVersion>
+  </PropertyGroup>
+
+  <!--
+    NuGet packaging metadata. Version matches the git tag already placed on main (v1.2.0) -
+    kept in sync manually for now (bump this alongside the next tag), not auto-derived from git,
+    since this project doesn't yet have a versioning tool wired into the build.
+
+    License is MPL-2.0, confirmed directly against the real LICENSE file at the repo root and
+    every source file's own header (both agree) - not assumed from the header comment alone.
+
+    Deliberately doesn't set GeneratePackageOnBuild - `dotnet pack` on demand is the more common,
+    less surprising default; regular `dotnet build` runs shouldn't also produce a .nupkg.
+
+    RepositoryUrl/PackageProjectUrl are left out rather than guessed at - add these once the repo
+    has a real, public URL to point to.
+  -->
+  <PropertyGroup>
+    <PackageId>OpenCdsi.VaxEngine.Core</PackageId>
+    <Version>1.2.0</Version>
+    <Authors>Dennis Dunn</Authors>
+    <Description>A .NET implementation of the CDC's CDSi (Clinical Decision Support for Immunization) Logic Specification v4.6. Given a patient's vaccination history, determines their immunization forecast - which doses are valid, due, past due, or complete - against the CDC's own reference data. Reference data (antigen schedules, series definitions) is supplied externally at runtime rather than bundled into the package, so a new CDC schedule drop doesn't require a new package release.</Description>
+    <PackageTags>CDSi;immunization;vaccine;vaccination;forecasting;CDC;healthcare;clinical-decision-support</PackageTags>
+    <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 Dennis Dunn</Copyright>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- CS1591 ("missing XML comment for publicly visible type or member") and CS1573
+         ("parameter has no matching param tag, but other parameters do") are both suppressed
+         deliberately: this project's own doc-comment convention documents WHY a class or method
+         works the way it does (the design reasoning) and calls out specific parameters only when
+         they genuinely need explanation - not a summary or a <param> tag on every single public
+         member/parameter for its own sake. Confirmed against the real pattern before suppressing,
+         not assumed: e.g. EvaluateSeriesHistory.Execute has <param> tags for the three parameters
+         that need explaining (antigenAdministeredRecords, priorEvaluatedDosesFromOtherAntigens,
+         assessmentDate) and none for the four self-explanatory ones (patient, series,
+         conflictsByImpactedCvx, resolveCompletedSeries) - exactly the selective style these two
+         warnings would otherwise force out of, replacing it with boilerplate tags with no real
+         content just to silence the compiler, not genuinely better documentation. -->
+    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
+  </PropertyGroup>
+
+</Project>
