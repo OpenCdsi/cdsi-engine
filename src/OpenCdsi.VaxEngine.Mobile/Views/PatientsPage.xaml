@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:OpenCdsi.VaxEngine.Mobile.ViewModels"
+             xmlns:models="clr-namespace:OpenCdsi.VaxEngine.Mobile.Models"
+             x:Class="OpenCdsi.VaxEngine.Mobile.Views.PatientsPage"
+             x:DataType="vm:PatientsViewModel"
+             Title="Patients"
+             BackgroundColor="{StaticResource SurfacePage}">
+
+    <ContentPage.ToolbarItems>
+        <ToolbarItem Text="Quick forecast" Command="{Binding QuickForecastCommand}" />
+        <ToolbarItem Text="Add patient" Command="{Binding AddPatientCommand}" />
+    </ContentPage.ToolbarItems>
+
+    <Grid RowDefinitions="Auto,*" RowSpacing="0">
+
+        <SearchBar Grid.Row="0"
+                   Placeholder="Search patients"
+                   Text="{Binding SearchText}"
+                   Margin="12,8"
+                   BackgroundColor="{StaticResource SurfaceCard}" />
+
+        <CollectionView Grid.Row="1"
+                         ItemsSource="{Binding Patients}"
+                         SelectionMode="Single"
+                         SelectionChangedCommand="{Binding OpenPatientCommand}"
+                         SelectionChangedCommandParameter="{Binding Source={RelativeSource Self}, Path=SelectedItem}">
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="models:Patient">
+                    <Grid Padding="16,12"
+                          ColumnDefinitions="*,Auto"
+                          BackgroundColor="{StaticResource SurfaceCard}">
+                        <VerticalStackLayout Grid.Column="0" Spacing="2">
+                            <Label Text="{Binding FullName}" FontSize="15" TextColor="{StaticResource TextPrimary}" />
+                            <Label Text="{Binding DateOfBirth, StringFormat='Born {0:dd MMM yyyy}'}"
+                                   FontSize="12" TextColor="{StaticResource TextSecondary}" />
+                        </VerticalStackLayout>
+                        <Label Grid.Column="1" Text="&#8250;" FontSize="16" TextColor="{StaticResource TextMuted}"
+                               VerticalOptions="Center" />
+                    </Grid>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+
+    </Grid>
+
+</ContentPage>
