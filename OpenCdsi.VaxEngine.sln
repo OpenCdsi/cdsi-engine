@@ -19,10 +19,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenCdsi.VaxEngine.Function
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenCdsi.VaxEngine.Conformance.Tests", "tests\OpenCdsi.VaxEngine.Conformance.Tests\OpenCdsi.VaxEngine.Conformance.Tests.csproj", "{A1B2C3D4-0008-4000-8000-000000000008}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenCdsi.VaxEngine.Mobile", "src\OpenCdsi.VaxEngine.Mobile\OpenCdsi.VaxEngine.Mobile.csproj", "{C511C8C0-8FE5-4AE5-BD48-88094BA82082}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -129,23 +125,8 @@ Global
 		{A1B2C3D4-0008-4000-8000-000000000008}.Release|x64.Build.0 = Release|Any CPU
 		{A1B2C3D4-0008-4000-8000-000000000008}.Release|x86.ActiveCfg = Release|Any CPU
 		{A1B2C3D4-0008-4000-8000-000000000008}.Release|x86.Build.0 = Release|Any CPU
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082}.Debug|x64.Build.0 = Debug|Any CPU
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082}.Debug|x86.Build.0 = Debug|Any CPU
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082}.Release|Any CPU.Build.0 = Release|Any CPU
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082}.Release|x64.ActiveCfg = Release|Any CPU
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082}.Release|x64.Build.0 = Release|Any CPU
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082}.Release|x86.ActiveCfg = Release|Any CPU
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
-	EndGlobalSection
-	GlobalSection(NestedProjects) = preSolution
-		{C511C8C0-8FE5-4AE5-BD48-88094BA82082} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal
